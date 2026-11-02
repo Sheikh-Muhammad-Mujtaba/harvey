@@ -43,6 +43,12 @@ icp:
   # "Head of Growth" is shopping for growth tooling). Used for careers-page
   # scanning and job-board discovery. Empty = fall back to titles above.
   hiring_signals: []
+  # Which discovered companies Harvey searches for contacts first, by the
+  # category discovery recorded (the industry column on the Companies tab,
+  # e.g. "dentist", "estate_agent"). Listed ones go first, in order; the rest
+  # follow. skip_categories are never prospected. Empty = all, in rotation.
+  focus_categories: []
+  skip_categories: []
 
 channels:
   email:

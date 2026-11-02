@@ -602,7 +602,8 @@ class Scout:
 
         batch_size = min(remaining, HUNTER_DOMAINS_PER_CYCLE)
         try:
-            companies = await self.state.companies_needing_prospects(limit=batch_size)
+            companies = await self.state.companies_needing_prospects(
+                limit=batch_size, **self._prospect_focus())
         except Exception as e:
             logger.debug(f"companies_needing_prospects failed: {e}")
             return 0
@@ -673,6 +674,12 @@ class Scout:
 
     # ── Strategy 0: Known companies with zero prospects ──
 
+    def _prospect_focus(self) -> dict:
+        """icp.focus_categories / skip_categories, for the backfill query."""
+        icp = self.config.icp
+        return {"focus": list(getattr(icp, "focus_categories", []) or []),
+                "skip": list(getattr(icp, "skip_categories", []) or [])}
+
     async def _prospect_via_known_companies(self) -> int:
         """Scrape team pages for companies already on file with no contacts.
 
@@ -689,7 +696,7 @@ class Scout:
 
         try:
             companies = await self.state.companies_needing_prospects(
-                limit=MAX_COMPANIES_PER_CYCLE
+                limit=MAX_COMPANIES_PER_CYCLE, **self._prospect_focus()
             )
         except Exception as e:
             logger.debug(f"companies_needing_prospects failed: {e}")

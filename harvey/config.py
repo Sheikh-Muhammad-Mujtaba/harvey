@@ -75,6 +75,13 @@ class ICPConfig(BaseModel):
     # Each variant runs in every city alongside the industry itself, so the
     # estimate grows with it. Empty → each industry is its own one search.
     keyword_variants: dict[str, list[str]] = {}
+    # Which discovered companies get searched for contacts first, by the
+    # category discovery recorded for them (the Companies tab's industry
+    # column, e.g. "wholesale", "estate_agent", "dentist"). Listed ones go
+    # first, in this order; the rest follow. Categories in `skip_categories`
+    # are never prospected. Both empty → every company, in rotation order.
+    focus_categories: list[str] = []
+    skip_categories: list[str] = []
 
 
 class WarmupConfig(BaseModel):

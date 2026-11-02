@@ -1937,7 +1937,8 @@ class StateManager:
             await db.commit()
 
     async def companies_needing_prospects(
-        self, limit: int = 10, stale_days: int = 14
+        self, limit: int = 10, stale_days: int = 14,
+        focus: list[str] | None = None, skip: list[str] | None = None,
     ) -> list[dict]:
         """Companies with a domain, zero prospects, and no recent check.
 
@@ -1951,21 +1952,30 @@ class StateManager:
         instead of retrying the same top-N-by-created_at companies every
         cycle — a company a team page didn't exist for last time is worth
         another look after ``stale_days``, not a permanent skip.
+
+        ``focus`` categories (companies.industry, case-insensitive) go first,
+        in the order given; ``skip`` categories are left out entirely.
         """
+        focus = [f.strip().lower() for f in (focus or []) if f.strip()]
+        skip = [s.strip().lower() for s in (skip or []) if s.strip()]
+        rank = "".join(f" WHEN ? THEN {i}" for i in range(len(focus)))
+        rank_sql = f"CASE LOWER(c.industry){rank} ELSE {len(focus)} END, " if focus else ""
+        skip_sql = (f" AND LOWER(c.industry) NOT IN ({', '.join('?' * len(skip))})"
+                    if skip else "")
         async with self._connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """SELECT c.id, c.name, c.domain, c.industry
+                f"""SELECT c.id, c.name, c.domain, c.industry
                    FROM companies c
                    LEFT JOIN prospects p ON p.company_id = c.id
                    WHERE c.domain != ''
                      AND (c.prospects_checked_at IS NULL
-                          OR c.prospects_checked_at < datetime('now', ?))
+                          OR c.prospects_checked_at < datetime('now', ?)){skip_sql}
                    GROUP BY c.id
                    HAVING COUNT(p.id) = 0
-                   ORDER BY c.prospects_checked_at IS NOT NULL, c.prospects_checked_at
+                   ORDER BY {rank_sql}c.prospects_checked_at IS NOT NULL, c.prospects_checked_at
                    LIMIT ?""",
-                (f"-{int(stale_days)} days", int(limit)),
+                (f"-{int(stale_days)} days", *skip, *focus, int(limit)),
             ) as cursor:
                 return [dict(r) for r in await cursor.fetchall()]
 
