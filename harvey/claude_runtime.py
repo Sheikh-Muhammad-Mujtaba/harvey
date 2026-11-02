@@ -70,6 +70,9 @@ STRIPPED_ENV = (
 
 HELP_TIMEOUT_SECONDS = 30
 
+# The one tool a call may ask for (see build_command).
+WEB_SEARCH_TOOL = "WebSearch"
+
 _capable: dict[tuple, bool] = {}
 _capable_lock = threading.Lock()
 
@@ -156,9 +159,13 @@ def runtime_env(cwd: str, base: dict | None = None) -> dict:
     return env
 
 
-def build_command(executable: str, model: str = "", session_id: str | None = None) -> list[str]:
-    """argv for one isolated, tool-less, print-mode call. The prompt goes
-    on stdin."""
+def build_command(executable: str, model: str = "", session_id: str | None = None,
+                  web_search: bool = False) -> list[str]:
+    """argv for one isolated, print-mode call. The prompt goes on stdin.
+
+    No tools, unless ``web_search``: then Claude's web search and nothing
+    else. It runs on Anthropic's side, so it can't touch this machine, and
+    WebFetch, Bash, file tools and MCP all stay off."""
     cmd = [
         executable, "-p",
         # JSON output carries exact token/cost accounting per call.
@@ -167,7 +174,7 @@ def build_command(executable: str, model: str = "", session_id: str | None = Non
         # scraped pages); with no tools an injected instruction has nothing
         # to act with, and --strict-mcp-config keeps the operator's MCP
         # servers and connectors out.
-        "--tools", "",
+        "--tools", WEB_SEARCH_TOOL if web_search else "",
         "--strict-mcp-config",
         # None of the operator's CLAUDE.md, hooks, skills, plugins or
         # settings files, and no transcript left behind.
@@ -176,6 +183,9 @@ def build_command(executable: str, model: str = "", session_id: str | None = Non
         "--disable-slash-commands",
         "--no-session-persistence",
     ]
+    if web_search:
+        # Print mode refuses a tool that needs permission unless it's allowed.
+        cmd += ["--allowedTools", WEB_SEARCH_TOOL]
     if model:
         # Validated by BrainConfig; affects this call only.
         cmd += ["--model", model]

@@ -252,6 +252,7 @@ class Brain:
         max_retries: int = DEFAULT_MAX_RETRIES,
         agent: str = "",
         task: str = "",
+        web_search: bool = False,
     ) -> str:
         """Send a prompt to the configured provider and return the response.
 
@@ -261,8 +262,14 @@ class Brain:
 
         ``agent``/``task`` label the call in the usage_events ledger so the
         dashboard can attribute tokens and cost to specific work.
+
+        ``web_search`` lets Claude search the web during this call (and use
+        nothing else). Codex calls stay tool-less, so it returns "" there.
         """
         if self.provider == "codex":
+            if web_search:
+                logger.error("Web search needs brain.provider: claude; not sent.")
+                return ""
             return await self._think_codex(
                 prompt, session_id=session_id, timeout=timeout,
                 max_retries=max_retries, agent=agent, task=task,
@@ -283,7 +290,8 @@ class Brain:
 
         # The prompt always travels on stdin: argv is visible to other local
         # users, Windows caps it at ~32k chars, and .cmd shims re-parse it.
-        cmd = claude_runtime.build_command(executable, self.model, session_id)
+        cmd = claude_runtime.build_command(executable, self.model, session_id,
+                                           web_search=web_search)
 
         logger.debug(f"Brain call (session={session_id}): {prompt[:100]}...")
 
@@ -578,6 +586,7 @@ class Brain:
         session_id: str | None = None,
         agent: str = "",
         task: str = "",
+        web_search: bool = False,
     ) -> dict | list | None:
         """Send a prompt and parse the response as JSON."""
         full_prompt = (
@@ -585,7 +594,8 @@ class Brain:
             + "\n\nRespond ONLY with valid JSON. No markdown, no explanation."
         )
         response = await self.think(
-            full_prompt, session_id=session_id, agent=agent, task=task
+            full_prompt, session_id=session_id, agent=agent, task=task,
+            web_search=web_search,
         )
         self.last_reply_empty = not response
         if not response:
