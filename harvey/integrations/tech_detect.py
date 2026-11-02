@@ -59,6 +59,8 @@ FINGERPRINTS: dict[str, list[str]] = {
     "Typeform": [r"embed\.typeform\.com"],
 
     # E-commerce (non-Shopify)
+    "Odoo": [r'<meta name="generator" content="Odoo', r"web\.assets_frontend", r"odoo\.define\("],
+    "ERPNext": [r"/assets/frappe/", r"/assets/erpnext/", r"frappe-web\.bundle"],
     "WooCommerce": [r"woocommerce", r"wc-ajax"],
     "BigCommerce": [r"cdn\d*\.bigcommerce\.com"],
 
