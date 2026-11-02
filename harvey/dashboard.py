@@ -700,6 +700,10 @@ async def start_harvey():
     # The native Claude CLI installer puts claude in ~/.local/bin without
     # always adding it to PATH; the heartbeat can't think without it.
     env = os.environ.copy()
+    # .env may have been edited by hand since the dashboard started; the
+    # child's load_dotenv won't override what it inherits, so pass the
+    # file's current values rather than the dashboard's stale copies.
+    env.update({k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None})
     local_bin = Path.home() / ".local" / "bin"
     if not shutil.which("claude") and local_bin.is_dir():
         env["PATH"] = str(local_bin) + os.pathsep + env.get("PATH", "")
