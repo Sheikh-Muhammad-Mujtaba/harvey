@@ -26,6 +26,7 @@ Hardening notes:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -515,7 +516,7 @@ class Scout:
             snippet_el = item.select_one(".b_caption p")
             if not (link and link.get("href")):
                 continue
-            href = self._attr_str(link.get("href"))
+            href = self._bing_target(self._attr_str(link.get("href")))
             snippet = snippet_el.get_text().strip() if snippet_el else ""
             if href.startswith("http"):
                 results.append((href, snippet))
@@ -523,6 +524,26 @@ class Scout:
         if results:
             logger.debug(f"Bing returned {len(results)} results")
         return results[:MAX_RESULTS_PER_QUERY]
+
+    @staticmethod
+    def _bing_target(href: str) -> str:
+        """The real URL behind a Bing click-tracking link.
+
+        Bing wraps results as bing.com/ck/a?...&u=a1<base64url of the URL>;
+        left wrapped, every result's domain reads as bing.com.
+        """
+        parsed = urlparse(href)
+        if not parsed.netloc.endswith("bing.com") or not parsed.path.startswith("/ck/"):
+            return href
+        token = parse_qs(parsed.query).get("u", [""])[0]
+        if not token.startswith("a1"):
+            return href
+        token = token[2:]
+        try:
+            target = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
+        except (ValueError, UnicodeDecodeError):
+            return href
+        return target if target.startswith("http") else href
 
     async def _search_google(self, query: str) -> list[tuple[str, str]]:
         """Search via Google HTML scraping — aggressive rate limiting, last resort."""
