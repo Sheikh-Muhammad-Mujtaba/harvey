@@ -86,6 +86,7 @@
     <div class="nav-group">
       <div class="nav-label">Work</div>
       <button class="active" onclick="showTab('today', this)"><svg class="icon" aria-hidden="true"><use href="#i-today"/></svg><span class="label">Today</span><span class="nav-count" id="nav-today"></span></button>
+      <button onclick="showTab('chat', this)"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg><span class="label">Ask Harvey</span></button>
       <button onclick="showTab('outbox', this)"><svg class="icon" aria-hidden="true"><use href="#i-outbox"/></svg><span class="label">Outbox</span><span class="nav-count" id="nav-outbox"></span></button>
       <button onclick="showTab('conversations', this)"><svg class="icon" aria-hidden="true"><use href="#i-conversations"/></svg><span class="label">Conversations</span><span class="nav-count" id="nav-conversations"></span></button>
     </div>
@@ -163,6 +164,29 @@
 </div>
 
 <!-- Signals: the confirmation gate -->
+<!-- Ask Harvey: chat with the agent -->
+<div id="chat" class="section">
+  <div class="section-head">
+    <div>
+      <h2>Ask Harvey</h2>
+      <p>Ask about your leads, drafts and results, or tell Harvey what to do: approve or rewrite
+         drafts, run discovery, change settings, pause sending. It acts straight away and
+         logs every action in Activity.</p>
+    </div>
+    <div class="page-actions">
+      <button class="btn btn-ghost btn-sm" id="chat-clear" onclick="clearChat()">Clear chat</button>
+    </div>
+  </div>
+  <div class="chat-log" id="chat-log" aria-live="polite"></div>
+  <form class="chat-form" onsubmit="sendChat(event)">
+    <textarea class="form-input" id="chat-input" rows="2" maxlength="4000"
+              placeholder="e.g. How many verified emails do we have in Dubai?"
+              onkeydown="chatKey(event)"></textarea>
+    <button class="btn btn-primary" id="chat-send" type="submit">Send</button>
+    <button class="btn btn-secondary" id="chat-stop" type="button" onclick="stopChat()" hidden>Stop</button>
+  </form>
+</div>
+
 <div id="signals" class="section">
   <div class="section-head">
     <div>

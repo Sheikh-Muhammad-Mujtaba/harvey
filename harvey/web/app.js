@@ -425,6 +425,7 @@ function showTab(id, btn) {
 function loadCurrentTab() {
   switch (currentTab) {
     case 'today': loadLiveStatus(); loadToday(); loadTrend(); loadFunnel(); loadSetupStatus(); loadRuns(); loadTodayActivity(); break;
+    case 'chat': loadChat(); break;
     case 'signals': loadSignals(); break;
     case 'discover': loadDiscoverProviders(); break;
     case 'companies': if (!companyDrill) loadCompanies(); break;
@@ -437,6 +438,124 @@ function loadCurrentTab() {
     case 'settings': loadSettings(); loadSendingModeCard(); break;
     case 'controls': loadHarveyStatus(); loadLogs(); break;
   }
+}
+
+// ── Ask Harvey: chat with the agent ──
+
+let _chatPoll = null;
+let _chatShown = '';
+
+// Replies can quote website text and emails, so escape first, then allow
+// only **bold**, `code` and "- " bullets.
+function chatInline(s) {
+  return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function chatMarkup(text) {
+  let html = '', list = false;
+  for (const line of escHtml(text).split('\n')) {
+    const bullet = line.match(/^\s*[-*]\s+(.*)/);
+    if (bullet) {
+      if (!list) { html += '<ul>'; list = true; }
+      html += '<li>' + chatInline(bullet[1]) + '</li>';
+      continue;
+    }
+    if (list) { html += '</ul>'; list = false; }
+    if (line.trim()) html += '<p>' + chatInline(line) + '</p>';
+  }
+  return html + (list ? '</ul>' : '');
+}
+
+function chatBubble(m) {
+  const mine = m.role === 'user';
+  const steps = (m.meta || {}).steps || [];
+  const acted = steps.filter(s => s.acts).length;
+  const trail = steps.length
+    ? '<details class="chat-steps"><summary>' + steps.length + (steps.length === 1 ? ' step' : ' steps') +
+      (acted ? ' · ' + acted + (acted === 1 ? ' action' : ' actions') : '') + '</summary><ul>' +
+      steps.map(s => '<li' + (s.ok ? '' : ' class="refused"') + '><code>' + escHtml(s.tool) + '</code> ' +
+        escHtml(JSON.stringify(s.args || {})) + (s.ok ? '' : ' (refused)') + '</li>').join('') +
+      '</ul></details>'
+    : '';
+  const body = mine ? '<p>' + escHtml(m.content).replace(/\n/g, '<br>') + '</p>' : chatMarkup(m.content);
+  return '<div class="chat-msg ' + (mine ? 'me' : 'harvey') + '"><div class="chat-bubble">' + body + '</div>' + trail + '</div>';
+}
+
+function renderChat(data) {
+  const msgs = data.messages || [];
+  const last = msgs.length ? msgs[msgs.length - 1].id : 0;
+  const key = [msgs.length, last, data.busy, data.status].join('|');
+  document.getElementById('chat-send').disabled = !!data.busy;
+  document.getElementById('chat-stop').hidden = !data.busy;
+  document.getElementById('chat-clear').disabled = !!data.busy;
+  if (key === _chatShown) return;
+  _chatShown = key;
+  const log = document.getElementById('chat-log');
+  if (!msgs.length && !data.busy) {
+    log.innerHTML = emptyState(icon('sparkle'), 'Ask Harvey anything',
+      'Try <i>What\'s waiting in the Outbox?</i>, <i>Which UK clinics have no online booking?</i> or <i>Pause sending until Monday.</i>');
+    return;
+  }
+  log.innerHTML = msgs.map(chatBubble).join('') + (data.busy
+    ? '<div class="chat-msg harvey"><div class="chat-bubble chat-pending"><span class="chat-dot"></span>' +
+      escHtml(data.status || 'Thinking') + '…</div></div>'
+    : '');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function loadChat() {
+  clearTimeout(_chatPoll);
+  const data = await api('/api/chat');
+  const log = document.getElementById('chat-log');
+  if (!data) { log.innerHTML = offlineState(); _chatShown = ''; return; }
+  if (data.error) {
+    log.innerHTML = emptyState(icon('alert'), 'Couldn\'t load the chat', escHtml(data.error));
+    _chatShown = '';
+    return;
+  }
+  renderChat(data);
+  if (data.busy && currentTab === 'chat') _chatPoll = setTimeout(loadChat, 1500);
+}
+
+async function sendChat(event) {
+  event.preventDefault();
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  const send = document.getElementById('chat-send');
+  send.disabled = true;
+  const r = await api('/api/chat', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message}),
+  });
+  if (!r || r.success === false) {
+    showToast((r && r.message) || 'Couldn\'t send that. Is the dashboard still running?', 'error');
+    send.disabled = false;
+    return;
+  }
+  input.value = '';
+  loadChat();
+}
+
+function chatKey(event) {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    event.target.form.requestSubmit();
+  }
+}
+
+async function stopChat() {
+  await api('/api/chat/stop', {method: 'POST'});
+  loadChat();
+}
+
+async function clearChat() {
+  if (!confirm('Clear the whole conversation with Harvey?')) return;
+  const r = await api('/api/chat/clear', {method: 'POST'});
+  if (r && r.success === false) showToast(r.message || 'Couldn\'t clear the chat.', 'error');
+  _chatShown = '';
+  loadChat();
 }
 
 // ── Today: what needs a human ──

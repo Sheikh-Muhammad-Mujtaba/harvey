@@ -2585,6 +2585,58 @@ async def get_runs_api():
         return {"error": str(e)}
 
 
+# ── Ask Harvey: the chat tab (see harvey/chat.py) ──
+
+_chat_agent = None
+
+
+def _chat():
+    global _chat_agent
+    if _chat_agent is None:
+        from harvey.chat import ChatAgent
+        _chat_agent = ChatAgent(_state(), app, token_store.get, DB_PATH)
+    return _chat_agent
+
+
+@app.get("/api/chat")
+async def get_chat():
+    try:
+        await _state().init_db()
+        return await _chat().snapshot()
+    except Exception as e:
+        logger.exception("chat history failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/chat")
+async def post_chat(request: Request):
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    message = body.get("message") if isinstance(body, dict) else None
+    if not isinstance(message, str):
+        return _refuse('expected {"message": "..."}', 400)
+    await _state().init_db()
+    problem = await _chat().start(message)
+    if problem:
+        return _refuse(problem, 409)
+    return {"success": True}
+
+
+@app.post("/api/chat/stop")
+async def stop_chat():
+    return {"success": _chat().stop()}
+
+
+@app.post("/api/chat/clear")
+async def clear_chat():
+    if _chat().busy:
+        return _refuse("Wait for Harvey to finish answering, or stop it first.")
+    await _chat().store.clear()
+    return {"success": True}
+
+
 WEB_DIR = (Path(__file__).resolve().parent / "web")
 
 

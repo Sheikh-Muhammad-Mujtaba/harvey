@@ -1036,3 +1036,45 @@ table.clip td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .warmup-actions { margin-top: var(--sp-2); align-items: center; }
 a.btn, a.btn:hover { text-decoration: none; }
 .warmup-actions .form-input { flex: 1 1 200px; height: 28px; min-width: 0; }
+
+/* ── Ask Harvey ── */
+.chat-log {
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-border);
+  padding: var(--sp-4); min-height: 320px; max-height: calc(100vh - 330px);
+  overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.chat-log .empty { margin: auto; }
+.chat-msg { display: flex; flex-direction: column; max-width: min(78%, 720px); }
+.chat-msg.me { align-self: flex-end; align-items: flex-end; }
+.chat-msg.harvey { align-self: flex-start; }
+.chat-bubble {
+  padding: 10px 14px; border-radius: var(--r-md); font-size: var(--fs-body);
+  line-height: 1.55; overflow-wrap: anywhere; background: var(--surface-2); color: var(--text);
+}
+.chat-msg.me .chat-bubble { background: var(--accent); color: var(--accent-text); }
+.chat-bubble p + p, .chat-bubble p + ul, .chat-bubble ul + p { margin-top: 6px; }
+.chat-bubble ul { margin: 4px 0 0 18px; }
+.chat-bubble li + li { margin-top: 2px; }
+.chat-bubble code {
+  font-family: var(--mono); font-size: 0.92em; background: var(--surface-3);
+  padding: 1px 4px; border-radius: var(--r-xs);
+}
+.chat-msg.me .chat-bubble code { background: rgba(255, 255, 255, 0.18); }
+.chat-pending { color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+.chat-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+@keyframes chat-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .chat-dot { animation: none; } }
+.chat-steps { margin-top: 4px; font-size: var(--fs-caption); color: var(--text-3); }
+.chat-steps summary { cursor: pointer; }
+.chat-steps ul { margin: 4px 0 0 16px; }
+.chat-steps code { font-family: var(--mono); color: var(--text-2); }
+.chat-steps .refused { color: var(--bad); }
+.chat-form { display: flex; gap: var(--sp-2); align-items: flex-end; margin-top: var(--sp-3); }
+.chat-form textarea { flex: 1; min-width: 0; resize: vertical; min-height: 44px; max-height: 200px; }
+@media (max-width: 640px) {
+  .chat-msg { max-width: 92%; }
+  .chat-log { max-height: calc(100vh - 380px); }
+}
