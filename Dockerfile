@@ -32,6 +32,7 @@ RUN test "$HARVEY_UID" -gt 0 && test "$HARVEY_GID" -gt 0 \
 COPY --chown=harvey:harvey harvey/ harvey/
 COPY --chown=harvey:harvey prompts/ prompts/
 COPY --chown=harvey:harvey skills/ skills/
+COPY --chown=harvey:harvey email_templates/ email_templates/
 COPY --chown=harvey:harvey harvey.yaml .
 
 USER harvey

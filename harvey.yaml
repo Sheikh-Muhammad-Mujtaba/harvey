@@ -93,6 +93,23 @@ usage:
     end: "07:00"
     timezone: "America/New_York"
 
+# Your signature, added under every email Harvey sends (above the compliance
+# footer). Sign as a real person: people reply to a person, not "Sales Team".
+# template: "plain" sends text only. Any other name is an HTML file in
+# email_templates/ (classic.html ships): the email then also goes out as
+# HTML with your logo, for mail clients that show it. Plain text stays what
+# you approve. `harvey signature logo` finds the logo on your website,
+# `harvey signature preview` shows the HTML.
+signature:
+  enabled: false
+  name: ""                  # blank = persona.name
+  title: ""
+  company: ""               # blank = persona.company
+  phone: ""
+  website: ""               # e.g. example.com
+  logo_url: ""
+  template: "plain"
+
 # Optional: check each new recipient with Precleared (precleared.dev) before
 # the first cold email: may cold marketing email go to this address under UK
 # PECR, US CAN-SPAM, Canada's CASL, Germany's UWG and France's rules? Any other

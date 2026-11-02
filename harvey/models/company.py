@@ -1,8 +1,31 @@
 """Company data model."""
 
+import re
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
+
+
+# Registration words nobody says out loud. Writing "Acme Trading LLC" in an
+# email tells the reader it was merged in from a list.
+_LEGAL_SUFFIX_RE = re.compile(
+    r"[\s,]+(?:l\.?l\.?c\.?|fz[\s-]?llc|fz[\s-]?co|fze|dmcc|ltd\.?|limited|plc|llp|"
+    r"inc\.?|incorporated|corp\.?|corporation|co\.?|pvt\.?|private|gmbh|s\.?a\.?|ag|b\.?v\.?|"
+    r"est\.?|establishment|(?:general\s+)?trading|&\s*co\.?)$",
+    re.IGNORECASE)
+
+
+def short_company_name(name: str) -> str:
+    """How a person writes a company's name: "Acme Marble Trading LLC" ->
+    "Acme Marble". Never shortens a name to nothing."""
+    full = " ".join((name or "").split())
+    short = full
+    while True:
+        cut = _LEGAL_SUFFIX_RE.sub("", short).rstrip(" ,.-&")
+        if cut == short or len(cut) < 2:
+            break
+        short = cut
+    return short or full
 
 
 def _utcnow() -> datetime:

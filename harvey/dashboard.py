@@ -1229,10 +1229,13 @@ async def outbox_edit(item_id: str, request: Request):
         # instead of failing quietly at send time. Content rules only: the
         # recipient isn't something an edit can change.
         from harvey.gate import pre_send_check
+        view = _compliance_view()
         checked = text
-        footer = _compliance_view()["footer"]
-        if item.get("kind") == "sequence" and footer and not text.rstrip().endswith(footer):
-            checked = text.rstrip() + "\n\n" + footer  # as the Sender will send it
+        if view["signature"] and view["signature"] not in text:
+            checked = text.rstrip() + "\n\n" + view["signature"]
+        footer = view["footer"]
+        if item.get("kind") == "sequence" and footer and not checked.rstrip().endswith(footer):
+            checked = checked.rstrip() + "\n\n" + footer  # as the Sender will send it
         gate = pre_send_check("reviewer@example.com", subject, checked)
         if not gate:
             return JSONResponse({"success": False,
@@ -1291,15 +1294,18 @@ def _send_as() -> str:
 
 
 def _compliance_view() -> dict:
-    """What the Sender adds under each cold email, so a reviewer sees the
-    email as it will leave, and the warning when the address is missing."""
+    """What the Sender adds under each email (the signature) and under each
+    cold email (the footer), so a reviewer sees the email as it will leave,
+    and the warning when the address is missing."""
     try:
         from harvey.config import compliance_footer_lines, compliance_notice, load_config
+        from harvey.signature import signature_text
         config = load_config()
         return {"footer": "\n".join(compliance_footer_lines(config)),
+                "signature": signature_text(config),
                 "compliance_notice": compliance_notice(config)}
     except Exception:
-        return {"footer": "", "compliance_notice": ""}
+        return {"footer": "", "signature": "", "compliance_notice": ""}
 
 
 async def _harvey_committed_ids() -> set[str]:
@@ -1491,7 +1497,8 @@ async def get_campaigns():
     rows = await query_db("SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 100")
     harvey_sends = _harvey_can_send()
     send_as = "" if harvey_sends else _send_as()
-    footer = _compliance_view()["footer"]
+    view = _compliance_view()
+    footer = "\n\n".join(x for x in (view["signature"], view["footer"]) if x)
     committed = await _harvey_committed_ids()
     hand_sent = await _hand_sent_ids()
     for row in rows:

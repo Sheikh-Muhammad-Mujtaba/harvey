@@ -130,8 +130,10 @@ class MailProvider(ABC):
         body: str,
         thread_ref: str = "",
         in_reply_to: str = "",
+        html: str = "",
     ) -> SendResult:
-        """Send one plain-text email. Reply threading when refs are given."""
+        """Send one plain-text email, with ``html`` as an alternative version
+        when given. Reply threading when refs are given."""
 
     @abstractmethod
     async def get_replies(self, limit: int = 50) -> list[InboundMessage]:

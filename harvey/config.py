@@ -588,6 +588,47 @@ class BrainConfig(BaseModel):
         return v
 
 
+_TEMPLATE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+class SignatureConfig(BaseModel):
+    # Added under every email Harvey sends (cold and replies), above the
+    # compliance footer. The writer never signs off itself when this is on.
+    enabled: bool = False
+    name: str = ""          # a real person replies better than a team; blank = persona.name
+    title: str = ""
+    company: str = ""       # blank = persona.company
+    phone: str = ""
+    website: str = ""       # shown as text, e.g. "example.com"
+    logo_url: str = ""      # https image; `harvey signature logo` finds it on your site
+    # "plain" sends plain text only. Any other name is an HTML file in
+    # email_templates/: the email goes out as plain text plus that HTML version.
+    template: str = "plain"
+
+    @field_validator("name", "title", "company", "phone", "website", "logo_url", mode="before")
+    @classmethod
+    def _blank_is_empty(cls, v):
+        return "" if v is None else str(v).strip()
+
+    @field_validator("logo_url")
+    @classmethod
+    def _https_logo(cls, v: str) -> str:
+        if v and not v.lower().startswith("https://"):
+            raise ValueError("logo_url must be an https:// image address")
+        return v
+
+    @field_validator("template")
+    @classmethod
+    def _template_name(cls, v: str) -> str:
+        v = (v or "plain").strip().lower()
+        if v.endswith(".html"):
+            v = v[:-5]
+        if not _TEMPLATE_NAME_RE.match(v):
+            raise ValueError("template is 'plain' or a file name in email_templates/ "
+                             "(letters, digits, - and _)")
+        return v
+
+
 class WriterConfig(BaseModel):
     # Run every draft through one extra editing-only brain call using the
     # Humanizer skill's instructions (~/.claude/skills/humanizer/SKILL.md,
@@ -605,6 +646,7 @@ class HarveyConfig(BaseModel):
     brain: BrainConfig = BrainConfig()
     compliance: ComplianceConfig = ComplianceConfig()
     writer: WriterConfig = WriterConfig()
+    signature: SignatureConfig = SignatureConfig()
     # The file it was loaded from, so a running Harvey can re-read the
     # sending mode from that same file (refresh_sending_mode).
     _source_path: str | None = PrivateAttr(default=None)
@@ -839,6 +881,70 @@ def set_require_approval(value: bool, path=None) -> Path:
         return path
     raise ConfigError(f"Couldn't change require_approval in {path.name} safely. "
                       f"Set channels.email.require_approval: {word} there by hand.")
+
+
+def set_signature_value(key: str, value, path=None) -> Path:
+    """Write signature.<key> into the config file Harvey reads, leaving the
+    rest of the file (comments included) as it was. The result must parse to
+    the same settings apart from that value, or nothing is written."""
+    import copy
+    import shutil
+    if key not in SignatureConfig.model_fields:
+        raise ConfigError(f"signature has no setting called {key}")
+    path = Path(path or _find_config_file())
+    target = path.resolve()
+    raw = target.read_bytes().decode("utf-8-sig").replace("\r\n", "\n")
+    try:
+        data = yaml.safe_load(raw) or {}
+    except yaml.YAMLError as e:
+        raise ConfigError(f"Invalid YAML in {path.name}: {e}")
+    expected = copy.deepcopy(data)
+    section = expected.get("signature")
+    if not isinstance(section, dict):
+        section = expected["signature"] = {}
+    section[key] = value
+    try:
+        HarveyConfig(**expected)
+    except ValidationError as e:
+        raise ConfigError(f"signature.{key} isn't valid:\n{_format_validation_error(e)}")
+    line = yaml.safe_dump({key: value}, default_flow_style=True, allow_unicode=True,
+                          width=10_000).strip()
+    if line.startswith("{") and line.endswith("}"):
+        line = line[1:-1].strip()
+
+    candidates = []
+    header = re.search(r"^signature:[ \t]*(?:#.*)?$", raw, re.MULTILINE)
+    if header:
+        start = header.end()
+        block_end = re.search(r"^\S", raw[start + 1:], re.MULTILINE)
+        end = start + 1 + block_end.start() if block_end else len(raw)
+        block = raw[start:end]
+        existing = re.search(rf"^([ \t]+){re.escape(key)}:.*$", block, re.MULTILINE)
+        if existing:
+            new_block = block[:existing.start()] + existing.group(1) + line + block[existing.end():]
+        else:
+            indent = re.search(r"^([ \t]+)\S", block, re.MULTILINE)
+            new_block = "\n" + (indent.group(1) if indent else "  ") + line + block
+        candidates.append(raw[:start] + new_block + raw[end:])
+    else:
+        candidates.append(raw.rstrip("\n") + f"\nsignature:\n  {line}\n")
+
+    for new in candidates:
+        try:
+            if yaml.safe_load(new) != expected:
+                continue
+        except yaml.YAMLError:
+            continue
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_text(new, encoding="utf-8")
+            shutil.copymode(target, tmp)
+            os.replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return path
+    raise ConfigError(f"Couldn't change signature.{key} in {path.name} safely. "
+                      f"Set it there by hand.")
 
 
 _mode_cache: dict[str, tuple[tuple, object]] = {}

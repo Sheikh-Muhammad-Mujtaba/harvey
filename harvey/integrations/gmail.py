@@ -213,6 +213,7 @@ class GmailProvider(MailProvider):
         body: str,
         thread_ref: str = "",
         in_reply_to: str = "",
+        html: str = "",
     ) -> SendResult:
         msg = EmailMessage()
         persona = self.config.persona
@@ -223,6 +224,8 @@ class GmailProvider(MailProvider):
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
         msg.set_content(body)
+        if html:
+            msg.add_alternative(html, subtype="html")
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         payload: dict = {"raw": raw}

@@ -19,6 +19,8 @@ from harvey.config import HarveyConfig
 from harvey.humanize import humanize, humanizer_enabled
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.models.campaign import Campaign, EmailStep
+from harvey.models.company import short_company_name
+from harvey.signature import signature_lines
 from harvey.state import WRITABLE_EMAIL_STATUSES, StateManager
 from harvey.sending_mode import sync_sending_mode
 from harvey.startups import startup_facts
@@ -39,6 +41,64 @@ PERSON_VAR = re.compile(r"\{\{\s*(first_?name|last_?name|title)\s*\}\}", re.IGNO
 # small — the rest of the 'new' pool is picked up on later cycles.
 NATIVE_BATCH_CAP = 8
 LEGACY_BATCH_CAP = 50
+
+# No name is known for a company's general inbox. "Hi there" is the line that
+# tells the reader the email went to a list, so it isn't used.
+INBOX_GREETING_RULE = (
+    "No person's name is known. Do NOT write 'Hi there', 'Hello there', 'Dear Sir/Madam',\n"
+    "  'Hello team' or any other stand-in greeting. Either open straight on the first\n"
+    "  sentence with no greeting, or greet the company by its short name ('{company} team,').")
+
+# What the last email in a sequence must do. Most people never read the
+# first two, so the last one has to stand on its own.
+BREAKUP_RULES = """- Email 3 (the last one): under 50 words. It must stand on its own for someone
+  who never read emails 1 and 2:
+  * Say plainly this is the last email, in a few words ("Last note from me.").
+  * Restate in ONE concrete sentence what you do for companies like theirs, naming
+    the actual outcome (not a category like "digital solutions" or "out-of-hours
+    enquiries").
+  * End with one easy reply: a single word they can send back ("reply 'later' and
+    I'll check back in a few months"). Never ask for "no": that word opts them out.
+  * NEVER: "closing the loop", "nothing back", "haven't heard back", "didn't hear
+    from you", "fair enough", "the timing isn't right", "isn't a priority",
+    "I'll stop bugging you", "breaking up", or anything that guesses why they
+    didn't reply or guilts them for it.
+  * Subject: about their business or the one thing you do, never "closing the
+    loop", "last one", "final follow-up" or "breaking up"."""
+
+
+# The lines that made the old breakup emails read as mass mail. A draft that
+# still uses one gets one rewrite, with the problems named.
+_STANDIN_GREETING_RE = re.compile(
+    r"^\s*(hi|hello|hey|dear)\s+(there|sir|madam|sir/madam|team|all)\b", re.IGNORECASE)
+_STALE_LINES = (
+    "closing the loop", "nothing back", "haven't heard back", "haven't heard from you",
+    "didn't hear back", "didn't hear from you", "fair enough", "timing isn't right",
+    "timing is not right", "isn't a priority", "not a priority", "stop bugging",
+)
+_TEAM_SIGNOFF_RE = re.compile(r"\b(team|department|sales|support)\b", re.IGNORECASE)
+
+
+def style_problems(subject: str, body: str) -> list[str]:
+    """Rule breaks the prompt forbids but models still slip into."""
+    problems = []
+    if _STANDIN_GREETING_RE.match(body or ""):
+        problems.append("opens with a stand-in greeting like 'Hi there'")
+    text = f"{subject}\n{body}".lower().replace("\u2019", "'")
+    used = [p for p in _STALE_LINES if p in text]
+    if used:
+        problems.append("uses " + ", ".join(f'"{p}"' for p in used[:3]))
+    lines = [l.strip() for l in (body or "").strip().splitlines() if l.strip()]
+    if len(lines) > 1 and len(lines[-1].split()) <= 5 and _TEAM_SIGNOFF_RE.search(lines[-1]):
+        problems.append(f"signs off as a team ('{lines[-1]}')")
+    return problems
+
+
+def _company_fact(company: str) -> str:
+    short = short_company_name(company)
+    if short and short != company:
+        return f"- Company: {short} (registered as {company}; always write it as {short})"
+    return f"- Company: {company}"
 
 
 class Writer:
@@ -276,17 +336,17 @@ class Writer:
         if prospect.is_company_inbox:
             facts = [
                 f"- Name: unknown (the company's general inbox, {prospect.email})",
-                f"- Company: {prospect.company}",
+                _company_fact(prospect.company),
             ]
             inbox_rule = (
                 "\n- This goes to the company's general inbox, most likely read by the owner"
-                "\n  or the office manager. Use no first name; open with 'Hi there' or"
-                "\n  address the company's team.")
+                "\n  or the office manager. "
+                + INBOX_GREETING_RULE.format(company=short_company_name(prospect.company)))
         else:
             facts = [
                 f"- Name: {prospect.full_name()}",
                 f"- Title: {prospect.title}",
-                f"- Company: {prospect.company}",
+                _company_fact(prospect.company),
             ]
         if prospect.industry:
             facts.append(f"- Industry: {prospect.industry}")
@@ -347,6 +407,7 @@ Requirements:
 - Write the actual text (no merge variables — you know their name/company).
 - Subject: lowercase, 2-5 words.
 - No postal address, unsubscribe or opt-out line: Harvey adds them when it sends.
+{self._signoff_rule()}
 - Follow every STRICT EMAIL RULE above.{inbox_rule}
 
 Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
@@ -355,6 +416,19 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             prompt, session_id="harvey-writer",
             agent="writer", task="personal_email",
         )
+        draft = self._personal_draft(result)
+        problems = style_problems(draft["subject"], draft["body"]) if draft else []
+        if problems:
+            retry = self._personal_draft(await self.brain.think_json(
+                prompt + self._fix_note([problems]), session_id="harvey-writer",
+                agent="writer", task="personal_email",
+            ))
+            if retry and len(style_problems(retry["subject"], retry["body"])) < len(problems):
+                draft = retry
+        return draft
+
+    @staticmethod
+    def _personal_draft(result) -> dict | None:
         if not isinstance(result, dict):
             return None
         subject = str(result.get("subject") or "").strip()
@@ -363,11 +437,28 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             return None
         return {"subject": subject[:120], "body": body[:2000]}
 
+    @staticmethod
+    def _fix_note(problems_by_email: list[list[str]]) -> str:
+        lines = "\n".join(
+            f"- Email {i + 1}: " + "; ".join(p)
+            for i, p in enumerate(problems_by_email) if p)
+        return ("\n\nYour last draft broke these rules. Write it again without them, "
+                "same format:\n" + lines)
+
+    def _signoff_rule(self) -> str:
+        """How the email ends: Harvey's signature, or the sender's first name."""
+        if signature_lines(self.config):
+            return ("- No sign-off, name, title or company at the end: Harvey adds the\n"
+                    "  sender's signature when it sends. End on your question.")
+        first = (self.config.persona.name or "").split()[0] if self.config.persona.name else ""
+        return (f"- Sign off with just the sender's first name ({first}) on its own line.\n"
+                "  Never sign as a team or a department.")
+
     async def _write_sequence(self, prospects: list) -> list[EmailStep]:
         """Ask the brain to write a 3-email sequence."""
         # Build context about the prospects
         prospect_summary = "\n".join(
-            f"- {p.full_name()}, {p.title} at {p.company}"
+            f"- {p.full_name()}, {p.title} at {short_company_name(p.company)}"
             + (f" | Notes: {p.personalization_notes}" if p.personalization_notes else "")
             for p in prospects[:5]  # Show sample for context
         )
@@ -376,7 +467,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             merge_rule = (
                 "- These go to each company's general inbox, so no names are known.\n"
                 "  Use {{company}} as the merge variable in every email and NEVER\n"
-                "  {{first_name}} or {{title}}. Greet with 'Hi there' or the company's team."
+                "  {{first_name}} or {{title}}. "
+                + INBOX_GREETING_RULE.format(company="{{company}}")
             )
         else:
             merge_rule = (
@@ -428,11 +520,13 @@ Write a 3-email cold outreach sequence for prospects like these:
 Requirements:
 - Email 1: Personalized cold observation + one question. Under 75 words. No pitch.
 - Email 2: Follow-up 3 days later. Different angle, one concrete proof point. Under 75 words.
-- Email 3: Break-up email 4 days after that. Under 40 words. Gracious, not guilt-tripping.
+  Name what you do in one plain sentence: the reader may not remember email 1.
+{BREAKUP_RULES}
 {merge_rule}
 - Never be pushy or salesy. Be consultative and value-driven.
 - Subject lines: lowercase, 2-5 words.
 - No postal address, unsubscribe or opt-out line: Harvey adds them when it sends.
+{self._signoff_rule()}
 - Follow every rule in the STRICT EMAIL RULES above. No exceptions.
 
 Return ONLY a JSON array (no markdown fences, no commentary):
@@ -449,6 +543,16 @@ Return ONLY a JSON array (no markdown fences, no commentary):
         # Read right after the call, before anything else can use the brain.
         self._no_reply = result is None and bool(getattr(self.brain, "last_reply_empty", False))
         steps = self._parse_sequence(result)
+        problems = [style_problems(st.subject, st.body) for st in steps]
+        if any(problems):
+            retry = self._parse_sequence(await self.brain.think_json(
+                prompt + self._fix_note(problems), session_id="harvey-writer",
+                agent="writer", task="write_sequence",
+            ))
+            if len(retry) >= len(steps) and (
+                    sum(len(style_problems(st.subject, st.body)) for st in retry)
+                    < sum(len(p) for p in problems)):
+                steps = retry
         if inbox_batch and any(
             PERSON_VAR.search(s.subject + s.body) for s in steps
         ):

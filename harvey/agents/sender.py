@@ -26,8 +26,10 @@ from harvey.gate import autopilot_review, do_not_contact_match, pre_send_check
 from harvey.send_window import in_window, next_send_time, recipient_country, recipient_zone
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
+from harvey.models.company import short_company_name
 from harvey.integrations.precleared import PreclearedClient, clear_hold, record_hold
 from harvey.sending_mode import sync_sending_mode
+from harvey.signature import render_html, with_signature
 from harvey.state import (
     AUTOPILOT_OFF_REASON, COLLEAGUE_REPLIED, HAND_SENT_REASON, HELD_FOR_REVIEW,
     MANUAL_SEND_KEY, MAYBE_SENT_PREFIX, RECHECK_PREFIX, StateManager,
@@ -384,7 +386,7 @@ class Sender:
         sequences = [
             {
                 "subject": step.subject.strip(),
-                "body": self._with_footer(step.body.strip()),
+                "body": self._with_footer(with_signature(step.body.strip(), self.config)),
                 "wait": step.delay_days,
             }
             for step in campaign.sequence
@@ -579,12 +581,12 @@ class Sender:
             # A company inbox has no name; "there" keeps "Hi {{first_name}}," readable.
             "first_name": prospect.first_name or ("there" if prospect.is_company_inbox else ""),
             "last_name": prospect.last_name,
-            "company": prospect.company,
+            "company": short_company_name(prospect.company or ""),
             "title": prospect.title,
             "personalization": prospect.personalization_notes,
         }
         # "{{company}}'s" for "Parkes Builders" should read "Builders'".
-        company = prospect.company or ""
+        company = replacements["company"]
         if company.endswith(("s", "S")):
             for tag in ("{{company}}", "{{ company }}"):
                 text = text.replace(tag + "'s", company + "'")
@@ -696,10 +698,17 @@ class Sender:
         return body.rstrip() + "\n\n" + footer
 
     def _outgoing_body(self, item: dict) -> str:
-        """The exact body that goes out: cold email gets the footer, replies don't."""
+        """The exact body that goes out: every email gets the signature (when
+        configured), cold email also the footer, replies don't."""
+        body = with_signature(item["body"], self.config)
         if item["kind"] == "sequence":
-            return self._with_footer(item["body"])
-        return item["body"]
+            return self._with_footer(body)
+        return body
+
+    def _outgoing_html(self, item: dict) -> str:
+        """The HTML version of the same email, or "" for plain text only."""
+        footer = compliance_footer_lines(self.config) if item["kind"] == "sequence" else []
+        return render_html(item["body"], self.config, footer)
 
     async def _follow_up_order(self, item: dict, prospect=None) -> str | tuple[str, str] | None:
         """For a follow-up: "wait" until the email before it went out and its
@@ -1016,11 +1025,20 @@ class Sender:
                 continue
 
             body = self._outgoing_body(item)
+            extra = {}
+            try:
+                html = self._outgoing_html(item)
+            except Exception as e:
+                html = ""
+                logger.warning(f"Sender: HTML template failed, sending plain text: {e}")
+            if html:
+                extra["html"] = html
             try:
                 result = await self.provider.send_email(
                     item["to_email"], item["subject"], body,
                     thread_ref=item.get("thread_ref", ""),
                     in_reply_to=item.get("in_reply_to", ""),
+                    **extra,
                 )
             except Exception as e:
                 # It may have gone out before the error: never retry it.

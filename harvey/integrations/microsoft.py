@@ -220,13 +220,16 @@ class MicrosoftProvider(MailProvider):
         body: str,
         thread_ref: str = "",
         in_reply_to: str = "",
+        html: str = "",
     ) -> SendResult:
         """Draft, then send, so the RFC Message-ID is known (bounces and
         replies are matched on it). A reply is drafted with createReply on
         the prospect's message, which sets In-Reply-To/References."""
         content = {
             "subject": subject,
-            "body": {"contentType": "Text", "content": body},
+            # Graph sends one body; Outlook derives the text version from HTML.
+            "body": ({"contentType": "HTML", "content": html} if html
+                     else {"contentType": "Text", "content": body}),
             "toRecipients": [{"emailAddress": {"address": to_email}}],
         }
         draft = None

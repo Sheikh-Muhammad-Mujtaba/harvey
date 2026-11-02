@@ -1629,6 +1629,7 @@ async function loadOutbox() {
   const pending = data.pending || [];
   _desk.items = pending;
   _desk.footer = data.footer || '';
+  _desk.signature = data.signature || '';
   // Keep the desk on the draft being edited even if the list shifted.
   const editingAt = _desk.editing ? pending.findIndex(p => p.id === _desk.editing) : -1;
   if (editingAt >= 0) _desk.i = editingAt;
@@ -1880,9 +1881,12 @@ function renderDesk(items, i) {
   // Not added again when the body already ends with it, as in the Sender.
   const added = cur.kind === 'sequence' && !(cur.body || '').trimEnd().endsWith(_desk.footer)
     ? _desk.footer : '';
-  const footer = added
+  const signed = _desk.signature && !(cur.body || '').includes(_desk.signature)
+    ? '<div class="desk-signature" title="Added when it sends (signature in harvey.yaml)">' +
+        escHtml(_desk.signature) + '</div>' : '';
+  const footer = signed + (added
     ? '<div class="desk-footer" title="Added when it sends (compliance in harvey.yaml)">' +
-        escHtml(added) + '</div>' : '';
+        escHtml(added) + '</div>' : '');
   const actions = editing
     ? '<button class="btn btn-primary" onclick="deskSave(' + jsq(cur.id) + ')">Save</button>' +
       '<button class="btn btn-secondary" onclick="deskEdit(null)">Cancel</button>'

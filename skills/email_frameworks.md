@@ -45,6 +45,11 @@ Style rules are negotiable. These are not:
 - **"Wanted to" / "Just wanted to"**: Weak, tentative. Say it directly.
 - **Parenthetical asides (like this)**: Adds clutter. Cut them.
 - **"No pressure" / "No obligation"**: Drawing attention to pressure.
+- **"Hi there" / "Dear Sir/Madam" / "Hello team"**: The surest sign the email went to a list. Use their first name, or open straight on the first sentence, or "Acme team," when only the company is known.
+- **Legal names**: "Acme Marble & Granite Trading LLC" is how a CRM writes it. A person writes "Acme Marble". Drop LLC, Ltd, FZE, Pvt, Inc, Trading.
+- **Team signatures**: "Sales Team", "The Acme Team". People reply to a person. Harvey adds the configured sender's signature, so the email body never signs off.
+- **Guessing why they didn't reply**: "Nothing back, so...", "Haven't heard from you", "Fair enough", "Sounds like the timing isn't right". Passive-aggressive, and it's a guess.
+- **"Closing the loop"**: The most recognised breakup subject there is. Filters and people both skip it.
 
 ### Banned Formatting
 - No bold text in cold emails
@@ -60,7 +65,7 @@ Style rules are negotiable. These are not:
 ## What Makes Good Cold Email
 
 ### It's short.
-Under 75 words for email 1. Under 60 for emails 2 and 3. Count them. If you're over, cut.
+Under 75 words for emails 1 and 2. Under 50 for email 3. Count them. If you're over, cut.
 
 ### It sounds like a person.
 Read it out loud. Does it sound like something you'd actually type to someone? Or does it sound like marketing copy? If it's the latter, rewrite.
@@ -165,27 +170,45 @@ We generate it straight out of the systems {{company}} already runs, so it's sit
 Worth a look, or is this already handled?
 ```
 
-### Email 3: The Breakup
+### Email 3: The Last Note
 
-Short. Respectful. Creates a tiny bit of FOMO without being manipulative. Under 40 words if possible.
+Breakup emails often get the most replies in a sequence, but only when they stand on their own. Most people never opened emails 1 and 2, so the last one is often the first one they actually read. It has to say, in one line, what you do. Under 50 words.
 
-Don't pitch. Don't summarize your product. Don't list what they're missing. Just close the loop like a normal human would.
+Don't guess why they didn't reply. Don't guilt them. Don't list what they're missing. Say it's the last note, say what you do in one concrete sentence, and make replying take one word.
 
 **Structure:**
-1. One sentence acknowledging they're busy or it's not the right time
-2. One sentence leaving the door open
-3. Optional: one genuinely human line (not fake warmth)
+1. A few words saying this is the last email ("Last note from me.")
+2. ONE concrete sentence on what you do for companies like theirs: the actual outcome, not a category
+3. A one-word reply option ("reply 'later' and I'll check back in a few months"). Never ask them to reply "no": that is an opt-out word.
 
 **Good example:**
 ```
-Subject: closing the loop
+Subject: stock counts at {{company}}
 
-{{first_name}}, sounds like the timing isn't right. Totally get it.
+{{first_name}}, last note from me.
 
-If this ever becomes a priority, I'm around.
+Short version: we set up ERP systems for stone traders so the stock in the system matches the yard, and invoices are ready for e-invoicing.
+
+If that's useful later, reply "later" and I'll check back in a few months.
 ```
 
-**Bad example:**
+**Bad example (no context, guesses, team signature):**
+```
+Subject: closing the loop
+
+Hi there,
+
+Nothing back, so this likely isn't a priority at {{company}} right now. Fair enough.
+
+If out-of-hours enquiries start costing you work later, reply here and I'll pick it up.
+
+Sales Team
+```
+
+The bad one opens like a mass email, assumes why they didn't reply, never says what the sender actually does, and is signed by a department.
+
+**Also bad:**
+
 ```
 Subject: last one from me
 
@@ -230,8 +253,8 @@ If the draft doesn't clearly hit one of these, it will be ignored no matter how 
 - `thought about {{company}}`
 - `one thing`
 - `your lead flow`
-- `closing the loop`
 - `{{company}} + [your product area]`
+- `stock counts at {{company}}`
 
 ### Bad subjects
 - `{{first_name}}, quick question about {{company}}'s growth`
@@ -240,6 +263,9 @@ If the draft doesn't clearly hit one of these, it will be ignored no matter how 
 - `3 ways to boost your leads`
 - `I'd love to connect`
 - `following up on my last email`
+- `closing the loop`
+- `last one from me`
+- `final follow-up`
 
 ---
 

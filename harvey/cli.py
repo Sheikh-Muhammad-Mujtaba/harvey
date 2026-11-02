@@ -921,6 +921,85 @@ def cmd_trulyinbox(args):
     raise SystemExit(asyncio.run(_run()))
 
 
+def cmd_signature(args):
+    """Show the email signature, find the logo on a website, or preview the HTML."""
+    from harvey.config import load_config, set_signature_value
+    from harvey.signature import (
+        PLAIN, find_logo, render_html, signature_of, signature_text, signs_as_team,
+        template_path,
+    )
+
+    config = load_config()
+    sig = signature_of(config)
+    if args.signature_action == "logo":
+        site = args.site or (config.channels.email.link_domains or [""])[0] \
+            or (config.persona.email.split("@")[-1] if "@" in config.persona.email else "")
+        if not site:
+            print("\n  Which website? Run: harvey signature logo example.com\n")
+            return
+        print(f"\n  Looking for the logo on {site}...")
+        url = asyncio.run(find_logo(site, sig.company or config.persona.company))
+        if not url:
+            print("  No logo a mail client can show (PNG, JPG or GIF) was found there.\n"
+                  "  Set signature.logo_url by hand to an https link to your logo.\n")
+            return
+        path = set_signature_value("logo_url", url)
+        print(f"  Found {url}\n  Saved as signature.logo_url in {path.name}.\n")
+        return
+    if args.signature_action == "preview":
+        from harvey.config import compliance_footer_lines
+        body = ("Example first line of an email.\n\n"
+                "A second paragraph, then the question that ends it?")
+        page = render_html(body, config, compliance_footer_lines(config))
+        if not page:
+            print("\n  The template is plain text, so there's no HTML to preview.\n")
+            return
+        out = Path(args._project_root) / "data" / "signature-preview.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(page, encoding="utf-8")
+        print(f"\n  Preview written to {out}\n")
+        return
+
+    print(f"\n  Signature: {'on' if sig.enabled else 'off'}"
+          f"   Template: {sig.template}"
+          + ("" if sig.template == PLAIN or template_path(sig.template).exists()
+             else "  (file missing: sending plain text)"))
+    print(f"  Logo: {sig.logo_url or '(none; run: harvey signature logo)'}")
+    text = signature_text(config)
+    if text:
+        print("\n" + "\n".join("    " + line for line in text.split("\n")))
+    if sig.enabled and signs_as_team(config):
+        print("\n  This signs as a team. People reply to a person: set signature.name "
+              "(and persona.name, the From name) to the real sender.")
+    print()
+
+
+def cmd_rewrite(args):
+    """Write every not-yet-sent email again under the current rules."""
+    from harvey.state import StateManager
+
+    async def _run():
+        state = StateManager()
+        await state.init_db()
+        plan = await state.discard_unsent_drafts(dry_run=True)
+        if not plan["drafts"] and not plan["prospects"]:
+            print("\n  Nothing to rewrite: no unsent cold emails are waiting.\n")
+            return
+        print(f"\n  {plan['drafts']} unsent cold email(s) to {plan['prospects']} prospect(s) "
+              f"would be cancelled and written again.\n"
+              f"  Nobody who has already been emailed, replied or opted out is touched.")
+        if not args.yes:
+            print("  Run again with --yes to do it.\n")
+            return
+        done = await state.discard_unsent_drafts()
+        print(f"  Done: {done['drafts']} draft(s) cancelled, {done['campaigns']} old "
+              f"campaign(s) retired, {done['prospects']} prospect(s) back in line.\n"
+              f"  The Writer drafts them again on its next cycles; they wait in the "
+              f"Outbox for your approval as before.\n")
+
+    asyncio.run(_run())
+
+
 def cmd_sending(args):
     """Pause/resume the sending kill switch."""
     from harvey.state import StateManager
@@ -1088,6 +1167,19 @@ def main():
     sub = subparsers.add_parser(
         "retry-writes", help="Retry prospects the Writer couldn't write an email for")
     sub.set_defaults(func=cmd_retry_writes)
+
+    sub = subparsers.add_parser(
+        "signature", help="Email signature and template: show, find the logo, preview")
+    sub.add_argument("signature_action", nargs="?", default="show",
+                     choices=["show", "logo", "preview"])
+    sub.add_argument("site", nargs="?", default="",
+                     help="logo: the website to read (default: your first link_domains entry)")
+    sub.set_defaults(func=cmd_signature)
+
+    sub = subparsers.add_parser(
+        "rewrite", help="Write every not-yet-sent email again under the current rules")
+    sub.add_argument("--yes", action="store_true", help="Do it (without it, only shows what would change)")
+    sub.set_defaults(func=cmd_rewrite)
 
     sub = subparsers.add_parser("sending", help="Kill switch: pause/resume sending")
     sub.add_argument("sending_action", nargs="?", default="status",

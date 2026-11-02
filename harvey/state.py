@@ -40,6 +40,8 @@ WRITABLE_EMAIL_STATUSES = ("verified", "risky")
 MANUAL_SEND_KEY = "manual_send:"
 # Outbox cancel reason for mail the user sent by hand instead; undo restores it.
 HAND_SENT_REASON = "sent_by_hand"
+# Why a draft was cancelled by `harvey rewrite`: it is written again, not sent.
+REWRITTEN_REASON = "rewritten under new writing rules"
 # Set when you undo someone's opt-out: Harvey's first reply to them after
 # that waits for your approval, even on autopilot. Cleared once it has.
 REVIEW_NEXT_REPLY_KEY = "review_next_reply:"
@@ -2064,6 +2066,60 @@ class StateManager:
             ) as cursor:
                 row = await cursor.fetchone()
                 return row[0] if row else default
+
+    async def discard_unsent_drafts(self, dry_run: bool = False) -> dict:
+        """Put every prospect who hasn't been emailed yet back in line for the
+        Writer, so their emails are written again under today's rules.
+
+        Only touches people with nothing sent, sending or maybe-sent: their
+        unsent cold drafts are cancelled (kept, marked REWRITTEN_REASON) and
+        they go back to 'new'. Campaigns left with nothing to send, and draft
+        campaigns not yet staged, are retired so the old copy can't be staged
+        again. Replies and anyone already contacted are left alone. One
+        transaction. Returns the counts."""
+        eligible = (
+            "SELECT p.id FROM prospects p WHERE p.status IN ('new', 'queued') "
+            "AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.prospect_id = p.id "
+            "AND o.status NOT IN ('pending_review', 'approved', 'rejected', 'cancelled'))")
+        live = ("'pending_review', 'approved', 'sending', 'sent', 'failed'")
+        now = _utcnow().isoformat()
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM outbox WHERE kind = 'sequence' "
+                f"AND status IN ('pending_review', 'approved') AND prospect_id IN ({eligible})"
+            ) as cur:
+                drafts = (await cur.fetchone())[0]
+            async with db.execute(
+                f"SELECT COUNT(*) FROM prospects WHERE status = 'queued' AND id IN ({eligible})"
+            ) as cur:
+                prospects = (await cur.fetchone())[0]
+            if dry_run:
+                return {"drafts": drafts, "prospects": prospects, "campaigns": None}
+            await db.execute(
+                "UPDATE outbox SET status = 'cancelled', error = ?, updated_at = ? "
+                "WHERE kind = 'sequence' AND status IN ('pending_review', 'approved') "
+                f"AND prospect_id IN ({eligible})",
+                (REWRITTEN_REASON, now),
+            )
+            await db.execute(
+                "UPDATE prospects SET status = 'new', updated_at = ? "
+                f"WHERE status = 'queued' AND id IN ({eligible})",
+                (now,),
+            )
+            cursor = await db.execute(
+                "UPDATE campaigns SET status = 'rewritten' "
+                "WHERE COALESCE(instantly_campaign_id, '') = '' "
+                "AND (status = 'draft' OR (status = 'active' AND NOT EXISTS ("
+                f"SELECT 1 FROM outbox o WHERE o.campaign_id = campaigns.id AND o.status IN ({live}))))"
+            )
+            campaigns = cursor.rowcount
+            await db.execute(
+                "INSERT INTO actions (id, action_type, agent, details_json) VALUES (?, ?, ?, ?)",
+                (_new_id(), "rewrite_drafts", "user",
+                 json.dumps({"drafts": drafts, "prospects": prospects, "campaigns": campaigns})),
+            )
+            await db.commit()
+        return {"drafts": drafts, "prospects": prospects, "campaigns": campaigns}
 
     async def retry_write_failed(self) -> int:
         """Give every 'write_failed' prospect another try. Returns how many."""
