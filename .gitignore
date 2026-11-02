@@ -60,3 +60,14 @@ harvey.local.yaml
 # Backups and in-progress writes from `harvey train` hold the same config.
 harvey.local.yaml.*
 harvey.yaml.*
+
+# Run logs: business names, prospect activity and server details
+logs/
+*.log
+
+# Branded email templates stay local; only the shared one is published
+email_templates/*
+!email_templates/classic.html
+
+# Test cache
+.pytest_cache/
