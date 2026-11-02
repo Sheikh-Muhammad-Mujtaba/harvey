@@ -6,17 +6,21 @@ still *send*), and any DNS name pointed at 127.0.0.1 can reach the port. So
 every request passes, in order:
 
 1. Host: one Host header naming a loopback address (``localhost``,
-   127.0.0.0/8, ``[::1]``) with an optional port. Anything else, including a
-   rebinding name that resolves to 127.0.0.1, is refused before the token is
-   looked at.
+   127.0.0.0/8, ``[::1]``) with an optional port, or one of the public
+   hostnames in ``HARVEY_DASHBOARD_PUBLIC_HOST`` (comma-separated) that the
+   HTTPS reverse proxy in front of the dashboard forwards. Anything else,
+   including a rebinding name that resolves to 127.0.0.1, is refused before
+   the token is looked at.
 2. Browser provenance: a request carrying ``Origin`` must come from exactly
-   this origin, and ``Sec-Fetch-Site`` must be ``same-origin`` or ``none``.
+   this origin (``https://`` for a public hostname, ``http://`` on loopback), and ``Sec-Fetch-Site`` must be ``same-origin`` or ``none``.
    (A top-level navigation to ``/`` is the one exception: the shell carries
    no data.) No CORS headers are ever sent, so preflights fail.
 3. Public shell: only ``GET``/``HEAD`` of ``/`` and ``/static/*`` (HTML, CSS,
-   JS, fonts; no data, no token) skip authentication.
+   JS, fonts; no data, no token) skip authentication, plus ``POST
+   /api/login``, which does its own checks (see dashboard_login).
 4. Bearer token: everything else needs ``Authorization: Bearer <token>``,
-   compared in constant time. Cookies and query strings are never read, so
+   either the dashboard token or a session token from signing in, the
+   dashboard token compared in constant time. Cookies and query strings are never read, so
    a browser can't attach the token on an attacker's behalf, and a
    cross-origin page can neither read it nor set the header without a
    preflight this server never approves. Non-browser clients need it too.
@@ -284,14 +288,25 @@ def is_public_path(method: str, path: str) -> bool:
     return all(seg not in ("", ".", "..") for seg in path[len("/static/"):].split("/"))
 
 
-def bearer_ok(header_values: list[str], token: str) -> bool:
+def presented_bearer(header_values: list[str]) -> str | None:
     if len(header_values) != 1:
-        return False
+        return None
     scheme, _, presented = header_values[0].partition(" ")
     if scheme.lower() != "bearer":
+        return None
+    return presented.strip()
+
+
+def bearer_ok(header_values: list[str], token: str) -> bool:
+    presented = presented_bearer(header_values)
+    if presented is None:
         return False
-    presented = presented.strip()
     return hmac.compare_digest(presented.encode("utf-8", "replace"), token.encode("ascii"))
+
+
+def public_hosts_from_env() -> set[str]:
+    raw = os.environ.get("HARVEY_DASHBOARD_PUBLIC_HOST", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
 def _is_json(content_type: str) -> bool:
@@ -303,9 +318,11 @@ class DashboardGuard:
     """ASGI middleware applying the checks in the module docstring to every
     request, and the security headers to every response."""
 
-    def __init__(self, app, store: TokenStore):
+    def __init__(self, app, store: TokenStore, sessions=None, public_hosts=public_hosts_from_env):
         self.app = app
         self.store = store
+        self.sessions = sessions
+        self.public_hosts = public_hosts
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
@@ -340,10 +357,12 @@ class DashboardGuard:
         # 1. Host, before anything else.
         hosts = headers.get("host", [])
         host = parse_host(hosts[0]) if len(hosts) == 1 else None
-        if host is None or not is_loopback(host):
+        public_host = host is not None and host in self.public_hosts()
+        if host is None or not (is_loopback(host) or public_host):
             return await deny(400, "bad_host",
                               "This dashboard only answers to localhost / 127.0.0.1.")
         host_header = hosts[0].lower()
+        own_origin = f"{'https' if public_host else 'http'}://{host_header}"
 
         # 2. Browser provenance.
         public = is_public_path(method, path)
@@ -351,7 +370,7 @@ class DashboardGuard:
                       and headers.get("sec-fetch-mode", [""])[0] == "navigate"
                       and headers.get("sec-fetch-dest", [""])[0] == "document")
         origins = headers.get("origin", [])
-        if origins and (len(origins) != 1 or origins[0].lower() != f"http://{host_header}"):
+        if origins and (len(origins) != 1 or origins[0].lower() != own_origin):
             if not navigation:
                 return await deny(403, "cross_origin", "Cross-origin requests are refused.")
         site = headers.get("sec-fetch-site", [])
@@ -361,15 +380,21 @@ class DashboardGuard:
         if public:
             return await self.app(scope, receive, send_secured)
 
-        # 3. Token (fail closed when it can't be loaded).
-        try:
-            token = self.store.get()
-        except TokenError as e:
-            return await deny(503, "token_unavailable", str(e))
-        if not bearer_ok(headers.get("authorization", []), token):
-            return await deny(401, "unauthorized",
-                              "Open the link printed by 'harvey dashboard' to unlock.",
-                              extra=[(b"www-authenticate", b'Bearer realm="harvey"')])
+        # 3. Token (fail closed when it can't be loaded). Signing in is the
+        # one call made without one.
+        login = method == "POST" and path == "/api/login" and self.sessions is not None
+        authorization = headers.get("authorization", [])
+        session_ok = (self.sessions is not None
+                      and self.sessions.valid(presented_bearer(authorization)))
+        if not (login or session_ok):
+            try:
+                token = self.store.get()
+            except TokenError as e:
+                return await deny(503, "token_unavailable", str(e))
+            if not bearer_ok(authorization, token):
+                return await deny(401, "unauthorized",
+                                  "Sign in, or open the link printed by 'harvey dashboard'.",
+                                  extra=[(b"www-authenticate", b'Bearer realm="harvey"')])
 
         # 4. Mutations carry JSON or nothing.
         if method in _UNSAFE_METHODS:

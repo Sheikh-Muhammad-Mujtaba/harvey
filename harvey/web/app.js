@@ -318,8 +318,8 @@ async function lockIfRefused(r) {
   showLock(r.status === 503
     ? 'The dashboard server can\'t use its token file, so it is refusing every request. ' + why
     : authToken()
-      ? 'The saved token was not accepted (the dashboard may have a new one).'
-      : 'This tab doesn\'t have the dashboard token yet.');
+      ? 'The saved token was not accepted (your session ended, or the dashboard has a new token). Sign in again.'
+      : '');
   return true;
 }
 
@@ -339,6 +339,24 @@ function hideLock() {
   _locked = false;
   const el = document.getElementById('lock-screen');
   if (el) el.style.display = 'none';
+}
+
+async function unlockWithPassword(event) {
+  event.preventDefault();
+  const user = document.getElementById('login-username');
+  const pass = document.getElementById('login-password');
+  const button = document.getElementById('login-submit');
+  button.disabled = true;
+  const result = await signIn(user.value.trim(), pass.value);
+  button.disabled = false;
+  pass.value = '';
+  if (!result.ok) {
+    document.getElementById('lock-reason').textContent = result.message;
+    return;
+  }
+  hideLock();
+  loadCurrentTab();
+  loadHarveyStatus();
 }
 
 function unlockWithToken(event) {

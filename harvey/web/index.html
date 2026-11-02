@@ -40,22 +40,37 @@
   </defs>
 </svg>
 
-<!-- Shown whenever the API refuses this tab (no token, a wrong one, or none on the server). -->
+<!-- Shown whenever the API refuses this tab (not signed in, an expired session, or no token on the server). -->
 <div id="lock-screen"
      style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;padding:24px">
-  <div class="card" style="max-width:500px;width:100%">
-    <h2>Dashboard locked</h2>
+  <div class="card" style="max-width:420px;width:100%">
+    <h2>Sign in to Harvey</h2>
     <p class="lede" id="lock-reason" role="alert"></p>
-    <p class="lede">Open the link that <code>harvey dashboard</code> printed in your terminal,
-      or run <code>harvey dashboard --url</code> to print it again. You can also paste the
-      token from <code>data/dashboard-token</code>:</p>
-    <form onsubmit="unlockWithToken(event)" class="form-row">
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label" for="lock-token">Dashboard token</label>
-        <input type="password" class="form-input" id="lock-token" autocomplete="off" spellcheck="false">
+    <form onsubmit="unlockWithPassword(event)">
+      <div class="form-group">
+        <label class="form-label" for="login-username">Username</label>
+        <input type="text" class="form-input" id="login-username" autocomplete="username"
+               autocapitalize="none" spellcheck="false" required>
       </div>
-      <button class="btn btn-primary" type="submit">Unlock</button>
+      <div class="form-group">
+        <label class="form-label" for="login-password">Password</label>
+        <input type="password" class="form-input" id="login-password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary" type="submit" id="login-submit" style="width:100%">Sign in</button>
     </form>
+    <details style="margin-top:16px">
+      <summary class="lede" style="cursor:pointer">Use the dashboard token instead</summary>
+      <p class="lede">Open the link that <code>harvey dashboard</code> printed in your terminal,
+        or run <code>harvey dashboard --url</code> to print it again. You can also paste the
+        token from <code>data/dashboard-token</code>:</p>
+      <form onsubmit="unlockWithToken(event)" class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" for="lock-token">Dashboard token</label>
+          <input type="password" class="form-input" id="lock-token" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn btn-primary" type="submit">Unlock</button>
+      </form>
+    </details>
   </div>
 </div>
 
@@ -100,6 +115,7 @@
     <div class="foot-actions">
       <button class="icon-btn" id="theme-btn" onclick="cycleTheme()"
               title="Appearance: follows your system until you pick one">auto</button>
+      <button class="icon-btn" onclick="signOut()" title="Sign out of this dashboard">sign out</button>
       <button class="refresh-btn" onclick="loadCurrentTab()" title="Refresh this page">
         <svg class="icon" style="width:13px;height:13px"><use href="#i-refresh"/></svg>Refresh</button>
     </div>

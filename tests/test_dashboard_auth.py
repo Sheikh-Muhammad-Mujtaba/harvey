@@ -45,6 +45,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(dash, "PID_FILE", tmp_path / "data" / "harvey.pid")
     monkeypatch.setattr(dash, "LOG_FILE", tmp_path / "data" / "harvey.log")
     dash.token_store.configure(tmp_path / "data" / "dashboard-token")
+    monkeypatch.setattr(dash.login_limiter, "path", tmp_path / "data" / "login-guard.json")
     spawned = []
 
     class NoPopen:
@@ -70,12 +71,13 @@ def authed(env):
 
 
 def _protected_requests():
-    """(method, path) for every route except the static shell."""
+    """(method, path) for every route except the static shell and signing
+    in (tests/test_dashboard_login.py)."""
     out = []
     for route in dash.app.routes:
         if not isinstance(route, Route):
             continue
-        if route.path in ("/", "/static/{path:path}"):
+        if route.path in ("/", "/static/{path:path}", "/api/login"):
             continue
         path = re.sub(r"\{[^}]+\}", "x", route.path)
         for method in sorted(route.methods - {"HEAD"}):

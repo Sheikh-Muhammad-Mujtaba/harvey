@@ -17,7 +17,7 @@ from pathlib import Path
 
 import aiosqlite
 import yaml
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import (
     HTMLResponse, JSONResponse, PlainTextResponse, Response,
@@ -26,6 +26,7 @@ from fastapi.responses import (
 logger = logging.getLogger("harvey.dashboard")
 
 from harvey import dashboard_auth as auth  # noqa: E402
+from harvey import dashboard_login as login  # noqa: E402
 from harvey.paths import PROJECT_ROOT  # noqa: E402
 from harvey.pidfile import LOCK_FILE, loop_lock_held, pid_alive  # noqa: E402
 from harvey.textio import read_user_text  # noqa: E402
@@ -35,6 +36,7 @@ CONFIG_FILE = PROJECT_ROOT / "harvey.yaml"
 PID_FILE = PROJECT_ROOT / "data" / "harvey.pid"
 LOG_FILE = PROJECT_ROOT / "data" / "harvey.log"
 TOKEN_FILE = PROJECT_ROOT / "data" / "dashboard-token"
+LOGIN_GUARD_FILE = PROJECT_ROOT / "data" / "login-guard.json"
 
 
 def _resolve_config_file() -> Path:
@@ -52,7 +54,27 @@ def _resolve_config_file() -> Path:
 # route except the static shell needs the token (see dashboard_auth).
 app = FastAPI(title="Harvey Dashboard", docs_url=None, redoc_url=None, openapi_url=None)
 token_store = auth.TokenStore(TOKEN_FILE)
-app.add_middleware(auth.DashboardGuard, store=token_store)
+sessions = login.SessionStore()
+login_limiter = login.LoginLimiter(LOGIN_GUARD_FILE)
+
+
+def _dashboard_setting(key: str) -> str:
+    """A sign-in setting, read from .env on every request so editing it
+    needs no restart; the process environment is the fallback."""
+    try:
+        value = dotenv_values(str(ENV_FILE)).get(key) if ENV_FILE.is_file() else None
+    except OSError:
+        value = None
+    return (value or os.environ.get(key) or "").strip()
+
+
+def _public_hosts() -> set[str]:
+    raw = _dashboard_setting("HARVEY_DASHBOARD_PUBLIC_HOST")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+app.add_middleware(auth.DashboardGuard, store=token_store, sessions=sessions,
+                   public_hosts=_public_hosts)
 
 # Harvey process tracking
 _harvey_process: subprocess.Popen | None = None
@@ -181,6 +203,64 @@ def _check_harvey_pid() -> int | None:
 
 
 # ── Setup Status ──
+
+
+@app.post("/api/login")
+async def sign_in(request: Request):
+    """Username and password for a session token (see dashboard_login)."""
+    headers: dict[str, list[str]] = {}
+    for k, v in request.headers.items():
+        headers.setdefault(k.lower(), []).append(v)
+    keys = login.limiter_keys(login.client_ip(request.scope, headers), login.device_id(headers))
+
+    def locked(seconds: int):
+        minutes = max(1, -(-seconds // 60))
+        return JSONResponse(
+            {"error": "locked",
+             "message": f"Too many failed sign-ins. Try again in {minutes} minute"
+                        f"{'s' if minutes != 1 else ''}."},
+            status_code=429, headers={"Retry-After": str(seconds)})
+
+    wait = login_limiter.locked_for(keys)
+    if wait > 0:
+        return locked(wait)
+
+    user = _dashboard_setting(login.USER_KEY)
+    encoded = _dashboard_setting(login.HASH_KEY)
+    if not user or not encoded:
+        return JSONResponse({"error": "login_disabled",
+                             "message": "Sign-in isn't set up on this dashboard."},
+                            status_code=503)
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    username = data.get("username") if isinstance(data, dict) else None
+    password = data.get("password") if isinstance(data, dict) else None
+    if not isinstance(username, str) or not isinstance(password, str) \
+            or len(username) > 256 or len(password) > 1024:
+        return JSONResponse({"error": "bad_request", "message": "Enter a username and password."},
+                            status_code=400)
+
+    if await asyncio.to_thread(login.check_credentials, username, password, user, encoded):
+        login_limiter.clear(keys)
+        return {"token": sessions.issue(), "expires_in": sessions.lifetime}
+
+    wait = login_limiter.record_failure(keys)
+    if wait > 0:
+        return locked(wait)
+    left = login_limiter.failures_left(keys)
+    return JSONResponse(
+        {"error": "bad_credentials",
+         "message": f"Wrong username or password. {left} attempt{'s' if left != 1 else ''} "
+                    f"left before sign-in is locked for {login.LOCK_SECONDS // 3600} hours."},
+        status_code=401)
+
+
+@app.post("/api/logout")
+async def sign_out(request: Request):
+    sessions.revoke(auth.presented_bearer(request.headers.getlist("authorization")))
+    return {"success": True}
 
 
 @app.get("/api/setup-status")

@@ -61,3 +61,47 @@ function authFetch(path, opts) {
   o.referrerPolicy = 'same-origin';
   return fetch(url.href, o);
 }
+
+// ── Signing in ──
+//
+// A username and password buy a session token, kept and sent exactly like
+// the dashboard token. Each browser also keeps a random device ID in
+// localStorage and sends it when signing in, so the server can lock this
+// machine as well as its IP address after too many wrong passwords.
+
+const DEVICE_KEY = 'harvey-device-id';
+const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+function deviceId() {
+  let id = '';
+  try { id = localStorage.getItem(DEVICE_KEY) || ''; } catch { /* ignore */ }
+  if (DEVICE_RE.test(id)) return id;
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  id = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try { localStorage.setItem(DEVICE_KEY, id); } catch { /* ignore */ }
+  return id;
+}
+
+// {ok: true} once signed in, else {ok: false, message}.
+async function signIn(username, password) {
+  let r;
+  try {
+    r = await authFetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Harvey-Device': deviceId()},
+      body: JSON.stringify({username, password}),
+    });
+  } catch {
+    return {ok: false, message: 'Can\'t reach the dashboard server.'};
+  }
+  const body = await r.json().catch(() => ({}));
+  if (r.ok && setAuthToken(body.token)) return {ok: true};
+  return {ok: false, message: body.message || 'Sign-in failed.'};
+}
+
+async function signOut() {
+  try { await authFetch('/api/logout', {method: 'POST'}); } catch { /* ignore */ }
+  clearAuthToken();
+  window.location.reload();
+}
