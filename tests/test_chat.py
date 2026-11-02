@@ -9,6 +9,7 @@ need the dashboard token like everything else.
 """
 
 import asyncio
+import json
 import sqlite3
 import types
 
@@ -162,3 +163,67 @@ def test_chat_endpoints_need_the_token(env):
         r = c.get("/api/chat", headers=auth)
         assert r.status_code == 200 and r.json()["messages"] == []
         assert c.post("/api/chat", json={"message": "  "}, headers=auth).status_code == 409
+
+
+def test_find_contacts_tool_fills_the_company(env, monkeypatch):
+    from harvey import contact_lookup
+
+    async def fetch_page(url):
+        return "Acme Tiles, Exampleton. Tel +44 161 555 0101"
+    monkeypatch.setattr(contact_lookup, "fetch_page", fetch_page)
+    con = sqlite3.connect(dash.DB_PATH)
+    con.execute("INSERT INTO companies (id, name, location) VALUES ('c9', 'Acme Tiles', 'Exampleton')")
+    con.commit()
+    con.close()
+
+    class Brain(ScriptedBrain):
+        _extract_json = staticmethod(__import__("harvey.brain", fromlist=["Brain"]).Brain._extract_json)
+
+        async def think(self, prompt, **_):
+            return json.dumps({"match": "exact", "phone": "+44 161 555 0101",
+                               "phone_source": "https://listing.example.org/acme"})
+    brain = Brain([
+        {"tool": "find_contacts", "args": {"company": "Acme Tiles"}},
+        {"reply": "Found and saved **+44 161 555 0101**."},
+    ])
+    msgs = asyncio.run(_run(_agent(brain), "Find contact details for Acme Tiles"))
+    step = msgs[1]["meta"]["steps"][0]
+    assert step["tool"] == "find_contacts" and step["ok"] and step["acts"]
+    phone = sqlite3.connect(dash.DB_PATH).execute(
+        "SELECT phone FROM companies WHERE id = 'c9'").fetchone()[0]
+    assert phone == "+44 161 555 0101"
+
+
+def test_find_contacts_prefers_the_exact_name(env, monkeypatch):
+    from harvey import contact_lookup
+    seen = []
+
+    async def fake_look_up(brain, state, config, env_, company):
+        seen.append(company["name"])
+        return contact_lookup.ContactCard(company_id=company["id"], name=company["name"])
+    monkeypatch.setattr(contact_lookup, "look_up", fake_look_up)
+    con = sqlite3.connect(dash.DB_PATH)
+    con.executemany("INSERT INTO companies (id, name) VALUES (?, ?)",
+                    [("m1", "Acme Metropolitan College"), ("m2", "Metro")])
+    con.commit()
+    con.close()
+    brain = ScriptedBrain([{"tool": "find_contacts", "args": {"company": "metro"}}, {"reply": "done"}])
+    asyncio.run(_run(_agent(brain), "contacts for Metro"))
+    assert seen == ["Metro"]
+
+
+def test_companies_api_carries_the_contact_card(env):
+    from harvey.signals import seed_signal_catalog
+    state = dash._state()
+    asyncio.run(seed_signal_catalog(state))
+    con = sqlite3.connect(dash.DB_PATH)
+    con.execute("INSERT INTO companies (id, name, phone) VALUES ('c7', 'Acme Tiles', '0161 555 0101')")
+    con.commit()
+    con.close()
+    asyncio.run(state.add_observation("CONTACT_DETAILS", company_id="c7", collector="contact_lookup",
+                                      value_text=json.dumps({"match": "exact", "address": "1 Example St"})))
+    with TestClient(dash.app, base_url="http://127.0.0.1:5555") as c:
+        rows = c.get("/api/companies", headers={"Authorization": f"Bearer {dash.token_store.get()}"}).json()
+    row = next(r for r in rows if r["id"] == "c7")
+    assert row["phone"] == "0161 555 0101"
+    assert json.loads(row["contact_card"])["address"] == "1 Example St"

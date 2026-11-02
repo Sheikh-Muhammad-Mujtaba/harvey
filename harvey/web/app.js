@@ -2148,7 +2148,7 @@ async function loadCompanies() {
     return;
   }
   let html = '<div class="table-card"><table class="nowrap"><thead><tr><th>Company</th><th>Industry</th>' +
-    '<th>Location</th><th>Size</th><th class="num">Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
+    '<th>Location</th><th>Phone</th><th class="num">Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
   data.forEach((c, i) => {
     const website = c.website || (c.domain ? 'https://' + c.domain : '');
     const domain = safeHref(website)
@@ -2160,13 +2160,55 @@ async function loadCompanies() {
         '<span class="cell-sub">' + domain + '</span></div></td>' +
       '<td>' + (c.industry ? '<span class="tag">' + escHtml(c.industry) + '</span>' : '') + '</td>' +
       '<td>' + escHtml(c.location) + '</td>' +
-      '<td class="muted">' + escHtml(c.company_size) + '</td>' +
+      '<td class="muted">' + escHtml(c.phone) + '</td>' +
       '<td class="num">' + (c.contact_count || 0) + '</td>' +
       '<td class="muted">' + sourceLabel(c.source) + '</td>' +
       '<td class="muted">' + relTime(c.created_at) + '</td></tr>';
   });
   el.innerHTML = html + '</tbody></table></div>' +
-    '<div class="table-foot">' + data.length + ' compan' + (data.length === 1 ? 'y' : 'ies') + '</div>';
+    '<div class="table-foot">' + data.length + ' compan' + (data.length === 1 ? 'y' : 'ies') +
+    ', most recently updated first</div>';
+}
+
+// What a web search found for a company (contact_lookup), as one card.
+// Website, phone and email were confirmed on their source page; the rest
+// is shown as found.
+function contactCardHtml(company) {
+  let card = null;
+  try { card = company.contact_card ? JSON.parse(company.contact_card) : null; } catch { card = null; }
+  const sources = (card && card.sources) || {};
+  const link = (url, text) => safeHref(url)
+    ? '<a href="' + safeHref(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(text || url) + '</a>'
+    : escHtml(text || url);
+  const source = key => sources[key] ? ' <span class="muted">· ' + link(sources[key], 'source') + '</span>' : '';
+  const rows = [];
+  const website = company.website || (company.domain ? 'https://' + company.domain : '') || (card && card.website) || '';
+  if (website) rows.push(['Website', link(website, website.replace(/^https?:\/\//i, '').replace(/\/$/, '')) + source('website')]);
+  const unconfirmed = ' <span class="tag">unconfirmed</span>';
+  const phone = company.phone || (card && card.phone_confirmed ? card.phone : '');
+  if (phone) rows.push(['Phone', escHtml(phone) + source('phone')]);
+  else if (card && card.phone) rows.push(['Phone', escHtml(card.phone) + unconfirmed]);
+  if (card && card.email_confirmed) {
+    rows.push(['Email', escHtml(card.email) + ' <span class="tag">' + escHtml(card.email_status || 'unchecked') + '</span>' +
+      (card.prospect_added ? ' <span class="muted">added as a contact</span>' : '') + source('email')]);
+  } else if (card && card.email) {
+    rows.push(['Email', escHtml(card.email) + unconfirmed + ' <span class="muted">not emailed</span>']);
+  }
+  if (card && card.whatsapp) rows.push(['WhatsApp', escHtml(card.whatsapp) + ' <span class="muted">as found</span>']);
+  if (card && card.address) rows.push(['Address', escHtml(card.address)]);
+  const socials = Object.entries((card && card.socials) || {}).map(([k, u]) => link(u, k[0].toUpperCase() + k.slice(1)));
+  if (socials.length) rows.push(['Social', socials.join(' · ')]);
+  if (card && card.description) rows.push(['About', escHtml(card.description)]);
+  if (!rows.length && !card) return '';
+  const foot = card
+    ? (card.match === 'exact'
+        ? 'Found by web search. Unconfirmed details couldn\'t be checked on a page naming the business.'
+        : 'Web search wasn\'t sure which business this is, so nothing was kept.') +
+      (card.note ? ' ' + escHtml(card.note) : '')
+    : '';
+  return '<div class="card"><div class="card-title">Contact details</div>' +
+    (rows.length ? '<dl class="contact-card">' + rows.map(([k, v]) => '<dt>' + k + '</dt><dd>' + v + '</dd>').join('') + '</dl>' : '') +
+    (foot ? '<p class="muted contact-card-foot">' + foot + '</p>' : '') + '</div>';
 }
 
 async function showCompanyContacts(index) {
@@ -2176,7 +2218,7 @@ async function showCompanyContacts(index) {
   const el = document.getElementById('companies-list');
   const data = await api('/api/companies/' + encodeURIComponent(company.id) + '/contacts');
   let html = '<button class="btn btn-ghost btn-sm" onclick="loadCompanies()" style="margin-bottom:12px">' +
-    '&larr; All companies</button>' +
+    '&larr; All companies</button>' + contactCardHtml(company) +
     '<div class="card flush"><div class="card-head"><h3>' + escHtml(company.name) + '</h3>' +
     '<span class="meta">' + escHtml([company.industry, company.location].filter(Boolean).join(' · ')) + '</span></div>';
   if (!data || !data.length) {

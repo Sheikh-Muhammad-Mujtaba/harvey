@@ -11,7 +11,7 @@ import yaml
 from harvey.textio import read_user_text
 from dotenv import load_dotenv
 from pydantic import (
-    BaseModel, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator,
+    BaseModel, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator,
 )
 
 from harvey.paths import PROJECT_ROOT
@@ -527,6 +527,10 @@ class UsageConfig(BaseModel):
     max_daily_claude_percent: float = 80.0
     heartbeat_interval_minutes: int = 15
     quiet_hours: QuietHoursConfig = QuietHoursConfig()
+    # Companies whose contact details are looked up with Claude's web search
+    # each prospecting cycle, once the CONTACT_DETAILS signal is confirmed.
+    # Each one is a Claude call; 0 turns the automatic lookups off.
+    contact_lookups_per_cycle: int = Field(default=3, ge=0, le=20)
 
     @field_validator("max_daily_claude_percent")
     @classmethod

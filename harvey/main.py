@@ -18,6 +18,7 @@ from harvey.integrations.mail_provider import NATIVE_PROVIDERS
 from harvey.pidfile import (
     LOCK_FILE, hold_loop_lock, read_pid, release_loop_lock, remove_pid_file, write_pid_file,
 )
+from harvey.contact_lookup import run_contact_lookup
 from harvey.pipeline import run_profile_stage
 from harvey.state import StateManager
 
@@ -418,6 +419,13 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
             # turns a name and a domain into something worth writing about.
             if summary.get("unprofiled", 0):
                 tasks.append(("profile", run_profile_stage(state, limit=25, config=config)))
+
+            # Contact details, by web search, for companies Harvey has no
+            # deliverable email for. Only while the CONTACT_DETAILS signal is
+            # confirmed, and only when prospecting or idle for lack of usable
+            # emails: it spends Claude calls, so replies and writing come first.
+            if action in ("prospect", "idle") and config.usage.contact_lookups_per_cycle:
+                tasks.append(("contacts", run_contact_lookup(state, brain, config, env)))
 
             outcomes = await _run_agents(tasks)
 

@@ -76,6 +76,7 @@ class Turn:
     http: httpx.AsyncClient
     db_path: Path
     state: Any
+    brain: Any = None
 
 
 # ── Reading ──
@@ -232,6 +233,30 @@ async def _set_setting(turn, a):
                     "(harvey_stop, then harvey_start) for it to take effect."}
 
 
+async def _find_contacts(turn, a):
+    from harvey import contact_lookup
+    from harvey.config import load_config, load_env
+    from harvey.signals import seed_signal_catalog
+
+    key = _need(a, "company")
+    async with turn.state._connect() as db:
+        cur = await db.execute(
+            "SELECT id, name, location, domain, phone, industry, description FROM companies "
+            "WHERE id = ? OR name LIKE ? "
+            "ORDER BY (id = ?) DESC, LOWER(name) = LOWER(?) DESC, LENGTH(name), name LIMIT 1",
+            (key, f"%{key}%", key, key))
+        row = await cur.fetchone()
+        cols = [d[0] for d in cur.description]
+    if not row:
+        raise ToolError(f"no company matching {key!r}")
+    await seed_signal_catalog(turn.state)
+    card = await contact_lookup.look_up(turn.brain, turn.state, load_config(), load_env(),
+                                        dict(zip(cols, row)))
+    if card is None:
+        raise ToolError("Claude gave no answer (paused or out of quota); try again later.")
+    return {**contact_lookup.card_dict(card), "summary": contact_lookup.describe(card)}
+
+
 def _post(path_fn, body_fn=None):
     async def run(turn, a):
         return await _call(turn, "POST", path_fn(a), body_fn(a) if body_fn else None)
@@ -296,6 +321,11 @@ def build_tools() -> list[Tool]:
              "Close a conversation, or hand an escalated one back to Harvey.", True,
              _post(lambda a: f"/api/conversations/{item(a)}/status",
                    lambda a: {"status": _need(a, "status")})),
+        Tool("find_contacts", "company (name or id)",
+             "Web search for a company's website, phone, email, WhatsApp, address and social "
+             "pages (about a minute). Website, phone and email are kept only when confirmed "
+             "on their source page; a deliverable email becomes a contact. Saved as the "
+             "company's contact card.", True, _find_contacts),
         Tool("set_setting", "key (dotted, e.g. icp.geography), value (JSON)",
              "Change one setting in the config file, validated first.", True, _set_setting),
     ]
@@ -494,7 +524,8 @@ class ChatAgent:
             async with httpx.AsyncClient(
                     transport=transport, base_url="http://127.0.0.1:5555", timeout=120,
                     headers={"Authorization": f"Bearer {self.token()}"}) as http:
-                turn = Turn(message=message, http=http, db_path=self.db_path, state=self.state)
+                turn = Turn(message=message, http=http, db_path=self.db_path, state=self.state,
+                            brain=brain)
                 reply = await self._loop(brain, config, schema, history, turn, steps)
         except asyncio.CancelledError:
             reply = "Stopped."

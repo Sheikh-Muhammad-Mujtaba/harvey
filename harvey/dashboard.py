@@ -600,11 +600,15 @@ async def test_instantly(request: Request):
 
 @app.get("/api/companies")
 async def get_companies():
-    """All companies with contact counts."""
+    """Companies with contact counts and their latest contact card (web
+    search, see contact_lookup), most recently updated first."""
     rows = await query_db("""
         SELECT c.*,
-            (SELECT COUNT(*) FROM prospects p WHERE p.company_id = c.id) as contact_count
-        FROM companies c ORDER BY c.created_at DESC LIMIT 200
+            (SELECT COUNT(*) FROM prospects p WHERE p.company_id = c.id) as contact_count,
+            (SELECT o.value_text FROM observations o
+             WHERE o.company_id = c.id AND o.signal_code = 'CONTACT_DETAILS'
+             ORDER BY o.observed_at DESC LIMIT 1) as contact_card
+        FROM companies c ORDER BY c.updated_at DESC, c.created_at DESC LIMIT 300
     """)
     return rows
 

@@ -1078,3 +1078,12 @@ a.btn, a.btn:hover { text-decoration: none; }
   .chat-msg { max-width: 92%; }
   .chat-log { max-height: calc(100vh - 380px); }
 }
+
+/* ── Company contact card ── */
+.contact-card {
+  display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--sp-4);
+  font-size: var(--fs-body); margin: 0;
+}
+.contact-card dt { color: var(--text-3); }
+.contact-card dd { margin: 0; overflow-wrap: anywhere; }
+.contact-card-foot { font-size: var(--fs-caption); margin-top: var(--sp-3); }

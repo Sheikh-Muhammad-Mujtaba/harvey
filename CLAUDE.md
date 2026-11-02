@@ -339,6 +339,7 @@ harvey outbox                # Review queued emails; --approve <id> / --approve-
 harvey signals               # The signal vocabulary; --confirm / --reject CODES (or 'free' / 'all')
 harvey discover              # Find businesses; --providers / --estimate / --provider <key>
 harvey sending pause|resume  # Kill switch for all outbound
+harvey contacts [--limit N] [--company NAME]  # Website/phone/email by Claude web search for companies with no usable email (automatic once CONTACT_DETAILS is confirmed)
 harvey warmup [domain]       # Sending-domain readiness: SPF/DKIM/DMARC, age, blocklists, ramp, TrulyInbox warmup
 harvey trulyinbox [connect|other]  # Warmup service: connect TrulyInbox, or record another service
 ```

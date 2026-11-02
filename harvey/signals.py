@@ -300,6 +300,24 @@ SIGNAL_CATALOG: list[dict] = [
 
     # ── People: who decides ──
     {
+        "code": "CONTACT_DETAILS",
+        "label": "Contact details (web search)",
+        "description": (
+            "For companies Harvey has no deliverable email for, Claude searches the web "
+            "for the business's website, phone, email, WhatsApp, address and social pages. "
+            "A website, phone or email is kept only after Harvey reads the page it came "
+            "from and finds it there next to the business's name, and an email becomes a "
+            "contact only if the verifier says it's deliverable. Shown as a contact card "
+            "on the Companies tab. A few companies each cycle "
+            "(usage.contact_lookups_per_cycle)."
+        ),
+        "category": "people",
+        "value_type": "text",
+        "collector": "contact_lookup",
+        "cost_note": "one Claude call with web search per company (your plan's quota)",
+        "confidence_floor": 0.0,
+    },
+    {
         "code": "CONTACT_FOUND",
         "label": "Named contact found",
         "description": "A named person scraped from the team/about page, with their title.",

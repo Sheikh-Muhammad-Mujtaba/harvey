@@ -1000,6 +1000,63 @@ def cmd_rewrite(args):
     asyncio.run(_run())
 
 
+def cmd_contacts(args):
+    """Find contact details with Claude's web search for companies with no usable email."""
+    from harvey import contact_lookup
+    from harvey.brain import Brain
+    from harvey.config import load_config, load_env
+    from harvey.signals import seed_signal_catalog
+    from harvey.state import StateManager
+
+    async def _run():
+        config = load_config()
+        if config.brain.provider != "claude":
+            print("\n  Contact lookup uses Claude's web search; set brain.provider: claude.\n")
+            return
+        state = StateManager()
+        await state.init_db()
+        await seed_signal_catalog(state)
+        brain = Brain(state, config.brain)
+        if args.company:
+            async with state._connect() as db:
+                cur = await db.execute(
+                    "SELECT id, name, location, domain, phone, industry, description FROM companies "
+                    "WHERE name LIKE ? ORDER BY LOWER(name) = LOWER(?) DESC, LENGTH(name), name "
+                    "LIMIT 1", (f"%{args.company}%", args.company))
+                row = await cur.fetchone()
+                cols = [d[0] for d in cur.description]
+            if not row:
+                print(f"\n  No company matching {args.company!r}.\n")
+                return
+            companies = [dict(zip(cols, row))]
+        else:
+            companies = await contact_lookup.companies_to_look_up(
+                state, args.limit, focus=config.icp.focus_categories,
+                skip=config.icp.skip_categories)
+        if not companies:
+            print("\n  Nothing to look up: every company has a usable email or was tried already.\n")
+            return
+        print(f"\n  Looking up {len(companies)} compan{'y' if len(companies) == 1 else 'ies'} "
+              f"(about a minute each)...\n")
+        env = load_env()
+        cards = []
+        for company in companies:
+            card = await contact_lookup.look_up(brain, state, config, env, company)
+            if card is None:
+                print(f"\n  Stopping: {brain.paused_reason or 'no answer from Claude'}\n")
+                break
+            cards.append(card)
+            print(f"  {card.name[:42]:42}  {contact_lookup.describe(card)}")
+        found = sum(c.found_anything() for c in cards)
+        added = sum(c.prospect_added for c in cards)
+        print(f"\n  {len(cards)} looked up, {found} with details found, {added} new email "
+              f"contact(s). See each company's card on the Companies tab.\n")
+        if "CONTACT_DETAILS" not in await state.confirmed_signal_codes():
+            print("  To run this automatically each cycle: harvey signals --confirm CONTACT_DETAILS\n")
+
+    asyncio.run(_run())
+
+
 def cmd_sending(args):
     """Pause/resume the sending kill switch."""
     from harvey.state import StateManager
@@ -1180,6 +1237,13 @@ def main():
         "rewrite", help="Write every not-yet-sent email again under the current rules")
     sub.add_argument("--yes", action="store_true", help="Do it (without it, only shows what would change)")
     sub.set_defaults(func=cmd_rewrite)
+
+    sub = subparsers.add_parser(
+        "contacts", help="Website, phone and email by Claude web search, for companies "
+                         "with no usable email")
+    sub.add_argument("--limit", type=int, default=10, help="How many companies (default 10)")
+    sub.add_argument("--company", default="", help="Look up one company by name")
+    sub.set_defaults(func=cmd_contacts)
 
     sub = subparsers.add_parser("sending", help="Kill switch: pause/resume sending")
     sub.add_argument("sending_action", nargs="?", default="status",
