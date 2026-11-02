@@ -938,6 +938,10 @@ class Scout:
         all_contacts = []
         for company in companies:
             domain = company["domain"]
+            if not await self._in_geography(domain, company.get("_homepage_html", "")):
+                logger.info(f"Scout: {domain} never mentions a target area "
+                            f"(icp.geography); skipped.")
+                continue
             company_id = await self._ensure_company(
                 name=company.get("name") or self._domain_to_name(domain),
                 domain=domain,
@@ -988,6 +992,46 @@ class Scout:
                 break
 
         return count
+
+    # Country names a site is as likely to write in short.
+    GEO_ALIASES = {
+        "united arab emirates": ["UAE"],
+        "united kingdom": ["UK", "England", "Scotland", "Wales"],
+    }
+
+    def _geo_patterns(self) -> list[re.Pattern]:
+        """Every place named in icp.geography ("Dubai, United Arab Emirates"
+        gives Dubai and United Arab Emirates), plus short forms of countries."""
+        terms = set()
+        for entry in self.config.icp.geography or []:
+            for part in entry.split(","):
+                part = part.strip()
+                if len(part) >= 3:
+                    terms.add(part)
+                    terms.update(self.GEO_ALIASES.get(part.lower(), []))
+        return [re.compile(rf"(?<![A-Za-z0-9]){re.escape(t)}(?![A-Za-z0-9])", re.IGNORECASE)
+                for t in sorted(terms)]
+
+    async def _in_geography(self, domain: str, homepage_html: str = "") -> bool:
+        """Does the company's own site mention a place we target?
+
+        Web search for "<industry> <city>" comes back with companies from
+        anywhere when the engine ignores the city (some answer automated
+        traffic on the first word alone), so a found company counts only if
+        its own pages name a target city or country. No geography set means
+        no check.
+        """
+        patterns = self._geo_patterns()
+        if not patterns:
+            return True
+        texts = [homepage_html] if homepage_html else []
+        try:
+            site = await self._read_site(domain)
+            texts.extend(text for _, text in site.get("pages", []))
+        except Exception as e:
+            logger.debug(f"Geography check couldn't read {domain}: {e}")
+        blob = " ".join(texts)
+        return any(p.search(blob) for p in patterns)
 
     async def _find_companies_via_search(self) -> list[dict]:
         """Find ICP-matching companies via web search."""
