@@ -577,7 +577,7 @@ def build_tools() -> list[Tool]:
         Tool("export_leads", "service?, industry?, location?, min_score?, status?, tier?, starred?, has?, q?, sort?",
              "An Excel download (Leads sheet plus a Contacts sheet) of the leads matching these filters (same filters as the Companies "
              "tab; status is one of new, phone_only, email_found, queued, contacted, replied, "
-             "opted_out; tier is A (named person with a direct line), B (named, no line), C (company inbox or phone only) or D (no way in), e.g. AB; has is website, phone or email). The operator gets a download button.",
+             "opted_out; tier is A (named person with a direct line), B (named, no line), C (company inbox or phone only) or D (no way in), e.g. AB; has is website, phone, email, no_website, or call (phone but no website or email: the call/WhatsApp list)). The operator gets a download button.",
              False, _export),
         Tool("set_setting", "key (dotted, e.g. icp.geography), value (JSON)",
              "Change one setting in the config file, validated first.", True, _set_setting),

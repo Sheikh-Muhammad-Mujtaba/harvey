@@ -558,19 +558,39 @@ function chatInline(s) {
           .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
+// Harvey's answers: paragraphs, bullet and numbered lists, and markdown
+// tables (Claude answers in them often). Text is escaped before any markup.
 function chatMarkup(text) {
-  let html = '', list = false;
-  for (const line of escHtml(text).split('\n')) {
-    const bullet = line.match(/^\s*[-*]\s+(.*)/);
-    if (bullet) {
-      if (!list) { html += '<ul>'; list = true; }
-      html += '<li>' + chatInline(bullet[1]) + '</li>';
+  const lines = escHtml(text).split('\n');
+  let html = '', list = '';
+  const close = () => { if (list) { html += '</' + list + '>'; list = ''; } };
+  const cells = row => row.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] || '')) {
+      close();
+      const head = cells(line);
+      i += 1;
+      const rows = [];
+      while (i + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[i + 1])) rows.push(cells(lines[++i]));
+      html += '<div class="chat-table"><table><thead><tr>' + head.map(h => '<th>' + chatInline(h) + '</th>').join('') +
+        '</tr></thead><tbody>' + rows.map(r => '<tr>' + r.map(c => '<td>' + chatInline(c) + '</td>').join('') + '</tr>').join('') +
+        '</tbody></table></div>';
       continue;
     }
-    if (list) { html += '</ul>'; list = false; }
+    const bullet = line.match(/^\s*[-*]\s+(.*)/);
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)/);
+    if (bullet || numbered) {
+      const kind = bullet ? 'ul' : 'ol';
+      if (list !== kind) { close(); html += '<' + kind + '>'; list = kind; }
+      html += '<li>' + chatInline((bullet || numbered)[1]) + '</li>';
+      continue;
+    }
+    close();
     if (line.trim()) html += '<p>' + chatInline(line) + '</p>';
   }
-  return html + (list ? '</ul>' : '');
+  close();
+  return html;
 }
 
 function chatBubble(m) {
@@ -939,7 +959,7 @@ function funnelChart(steps) {
   const max = steps[0].count;
   return '<ol class="funnel2">' + steps.map((s, i) => {
     const prev = i ? steps[i - 1].count : 0;
-    const conv = i && prev ? Math.round(100 * s.count / prev) : null;
+    const conv = i && prev && s.count <= prev ? Math.round(100 * s.count / prev) : null;   // deals moved by hand can outrun the step before
     const w = s.count ? Math.max(2, 100 * s.count / max) : 0;
     return '<li class="f-step" tabindex="0" data-tip="' + escHtml('<b>' + s.label + '</b><br>' + s.count.toLocaleString() +
         (conv !== null ? ' · ' + conv + '% of ' + steps[i - 1].label.toLowerCase() : '')) + '">' +

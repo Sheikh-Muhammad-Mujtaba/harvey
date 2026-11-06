@@ -142,8 +142,8 @@
               title="Theme: follows your system" aria-label="Theme: follows your system"><svg class="icon" aria-hidden="true"><use href="#i-theme-auto"/></svg></button>
       <button class="icon-btn" onclick="signOut()" title="Sign out of this dashboard" aria-label="Sign out">
         <svg class="icon foot-icon" aria-hidden="true"><use href="#i-logout"/></svg><span class="foot-label">Sign out</span></button>
-      <button class="refresh-btn" onclick="loadCurrentTab()" title="Refresh this page" aria-label="Refresh">
-        <svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-refresh"/></svg><span class="foot-label">Refresh</span></button>
+      <button class="refresh-btn icon-only" onclick="loadCurrentTab()" title="Refresh this page" aria-label="Refresh this page">
+        <svg class="icon" style="width:14px;height:14px" aria-hidden="true"><use href="#i-refresh"/></svg></button>
     </div>
   </div>
 </aside>
@@ -397,6 +397,7 @@
     <select class="form-input" id="lf-has" aria-label="Contact details" onchange="leadFilterChanged()">
       <option value="">Any contact details</option><option value="email">Has email</option>
       <option value="phone">Has phone</option><option value="website">Has website</option>
+      <option value="no_website">No website</option><option value="call">Call list: phone, no website or email</option>
     </select>
     <select class="form-input" id="lf-sort" aria-label="Sort" onchange="leadFilterChanged()">
       <option value="score">Best score first</option><option value="recent">Recently updated</option><option value="name">Name A&ndash;Z</option>

@@ -1561,3 +1561,13 @@ html, .deal-board, .deal-cards, .chat-log, .desk-list, .query-list, .table-card 
 .sidebar::-webkit-scrollbar-thumb, nav#side-nav::-webkit-scrollbar-thumb { background: transparent; border: 0; border-radius: 99px; }
 .sidebar:hover::-webkit-scrollbar-thumb, nav#side-nav:hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
 .sidebar::-webkit-scrollbar-thumb:hover, nav#side-nav::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+.brand .tagline { white-space: nowrap; }
+.refresh-btn.icon-only { width: 32px; padding: 0; justify-content: center; }
+.foot-actions { flex-wrap: nowrap; }
+.foot-actions .icon-btn:not(.theme-btn) { flex: 1; justify-content: center; }
+.chat-table { overflow-x: auto; margin: 6px 0 10px; border-radius: var(--r-sm); box-shadow: var(--shadow-border); }
+.chat-table table { font-size: var(--fs-ui); }
+.chat-table th { background: var(--surface-2); text-align: left; }
+.chat-table th, .chat-table td { padding: 7px 12px; white-space: nowrap; }
+.chat-table tr:last-child td { border-bottom: 0; }
+.chat-bubble ol { margin: 4px 0 8px 20px; }

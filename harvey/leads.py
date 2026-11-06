@@ -113,6 +113,13 @@ def _where(filters: dict, config) -> tuple[str, list]:
         where.append("COALESCE(phone, '') != ''")
     elif has == "email":
         where.append("lead_status IN ('email_found', 'queued', 'contacted', 'replied')")
+    elif has == "no_website":
+        # The best prospects for a website build: no site of their own.
+        where.append("COALESCE(domain, '') = '' AND COALESCE(website, '') = ''")
+    elif has == "call":
+        # The call/WhatsApp list: no website and no email, but a phone.
+        where.append("COALESCE(domain, '') = '' AND COALESCE(phone, '') != '' "
+                     "AND lead_status IN ('new', 'phone_only')")
     if filters.get("q"):
         where.append("(name LIKE ? OR domain LIKE ?)")
         params += [f"%{str(filters['q']).strip()}%"] * 2

@@ -285,3 +285,14 @@ def test_excel_export_follows_filters_and_handles_no_rows(env):
     data = leads.to_xlsx(rows, [], {"q": "nothing-matches"}, "2026-01-01 00:00")
     wb = load_workbook(io.BytesIO(data))
     assert wb["Leads"].max_row == 1 and "q = nothing-matches" in wb["About"]["B3"].value
+
+
+def test_no_website_and_call_list_filters(env):
+    con = sqlite3.connect(dash.DB_PATH)
+    con.execute("UPDATE companies SET phone = '+1 555 0102' WHERE id = 'w1'")
+    con.commit()
+    con.close()
+    ids = lambda has: sorted(r["id"] for r in asyncio.run(
+        leads.list_leads(env, {"has": has}, _config()))["rows"])
+    assert ids("no_website") == ["d2", "h1", "w1"]
+    assert ids("call") == ["d2", "w1"]

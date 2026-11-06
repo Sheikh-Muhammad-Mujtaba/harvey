@@ -22,14 +22,12 @@ Decision: write_campaign (3 new prospects with no drafts)
 Cycle complete. Sleeping for 15 minutes.
 ```
 
-And the dashboard it keeps, at `localhost:5555`. In this order: the Today screen, a
-conversation Harvey handed back because a prospect asked for a contract, approving
-a drafted reply from the outbox, confirming a signal, building a cohort from
-confirmed signals, searching contacts, and the same screen in dark mode:
+And the dashboard it keeps, at `localhost:5555`: where the pipeline stands, what came in and
+went out, who answered, and what it's worth.
 
-![Harvey's dashboard: the Today screen, a conversation handed back for a human, approving a reply in the outbox, confirming a signal and building a cohort, searching contacts, then dark mode](docs/dashboard.gif)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/insights-dark.png"><img alt="The Insights screen: five headline figures with trends and change against the previous period, outreach activity per day, the conversion funnel, pipeline by stage, how reachable leads are, and lead scores" src="docs/screenshots/insights-light.png"></picture>
 
-<sub>The demo data is invented: "Bookwell" selling online booking to roofers, dental practices and HVAC shops, on `.test` domains.</sub>
+<sub>The demo data is invented: "Bookwell" selling online booking to roofers, dental practices and HVAC shops, on `.test` domains. The screen follows your system's light or dark setting.</sub>
 
 ---
 
@@ -37,6 +35,7 @@ confirmed signals, searching contacts, and the same screen in dark mode:
 
 - [Why the subscription thing matters](#why-the-subscription-thing-matters)
 - [What Harvey actually does](#what-harvey-actually-does)
+- [From lead to closed deal](#from-lead-to-closed-deal)
 - [Quick start](#quick-start)
 - [You confirm what it looks for](#you-confirm-what-it-looks-for)
 - [The prospecting pipeline](#the-prospecting-pipeline)
@@ -102,6 +101,58 @@ handle replies  >  send campaigns  >  write campaigns  >  prospect  >  idle (ana
 ```
 
 Profiling and outbox draining ride along on **every** cycle regardless, because they cost nothing and have to happen on schedule.
+
+---
+
+## From lead to closed deal
+
+Finding businesses and emailing them is half of selling. The other half is knowing which ones are
+worth your time, who inside them decides, what to say, and what you promised to do next. Harvey
+keeps all of that in the same place, and nothing it finds is used on trust.
+
+**Which leads are worth it.** Write what a good client looks like for each service you sell
+(`lead_scoring.criteria`: budget, kind of business, how likely to close) and Harvey scores leads 0-100
+against it with Claude's web search, gives the reasons and risks, and stars the best. Tag each service
+with the business types it fits (`icp.service_tags`) and every lead shows which of your services it's
+for. Score in the background from the Companies tab or Ask Harvey, or `harvey score`.
+
+**How to reach them.** Every lead carries a reach tier: **A** a named person with a direct line,
+**B** a named person with none yet, **C** only the company's own inbox or phone, **D** no way in yet.
+For businesses with no usable email, contact lookup searches the web for their website, phone, email,
+WhatsApp and social pages, and keeps a phone or email only after reading the page it came from and
+finding it there next to the business's name. Leads with no website at all are one filter away
+(**No website**, or **Call list**: phone but no website or email), ready to export as a call list.
+
+**Who decides.** Find people looks for the person who signs off (owner, MD, finance head) and the one
+who feels the problem every day and would push for it (the marketing, operations or IT lead): deals
+with both close far more often. A person becomes a contact only when Harvey reads a page that names
+them at that business. Their email is the one that page publishes, or one learned from the company's
+address pattern and verified. LinkedIn is never read; someone seen only there stays on the company,
+marked unconfirmed, for you to check.
+
+**What to say.** A pitch brief per company: the approach that fits where the buyer is (help them see
+a problem, reframe one they live with, or win a comparison), the angle to open with and why now, what
+doing nothing costs them, how your offer maps to their situation, likely objections with answers,
+questions for the first call, one next step, an opening line and a short touch plan across email,
+phone and WhatsApp. Gaps are listed rather than guessed, with sources. The angle also goes to the
+writer for that company's emails.
+
+**Where each deal stands.** The **Deals** board runs from qualified to won. Harvey moves cards itself
+as it emails and people reply; you drag a card for what happens off email (a call booked, a proposal
+sent, a deal signed), give it a monthly value, and say why when one is lost.
+
+**What you promised.** **Tasks** keeps follow-ups, overdue first. Whenever someone writes back,
+Harvey adds "reply to them" due today: an answer within the hour turns into a deal far more often than
+one tomorrow.
+
+**Just ask.** **Ask Harvey** is a chat with your pipeline: questions answered from live data,
+and actions taken through the same checks as the buttons: score these, find the owner at that one,
+move this deal, remind me Thursday, give me an Excel of starred leads with a phone. Sessions are kept,
+and autopilot only turns on if your own message says so.
+
+| A company | The deals board |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/company-dark.png"><img alt="A company: deal stage and value, contact details with sources, lead score with reasons, people found with who signs off and who feels the problem, notes, then the pitch brief" src="docs/screenshots/company-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/deals-dark.png"><img alt="The Deals board: columns from lead to lost, each card with its score, lead type, contact, value and next follow-up" src="docs/screenshots/deals-light.png"></picture> |
 
 ---
 
@@ -524,29 +575,46 @@ Plain HTML, CSS and JavaScript served from `harvey/web/`. No build step, no fram
   <img alt="The Today screen: four headline figures with 14-day trends, the list of things waiting on you, contacts by stage, and collector runs" src="docs/screenshots/today-light.png">
 </picture>
 
-The sidebar is grouped by what you're doing: **Work** (what needs you), **Pipeline** (what Harvey is building) and **System** (how it's running). Counts next to a tab mean something is waiting there.
+The sidebar is grouped by what you're doing: **Work** (what needs you), **Pipeline** (what Harvey is building) and **System** (how it's running). Counts next to a tab mean something is waiting there. On a wide screen the button beside the logo folds it to an icon rail; on a phone it's a drawer behind the menu button.
 
 **Work**
-- **Today** — four headline figures with 14-day trends (contacts found, emails sent, conversations, waiting on you), then everything that needs a decision, contacts by stage, collector runs and what the pipeline is doing right now. Setup shows here until it's finished, then disappears.
+- **Today** — four headline figures with 14-day trends (contacts found, emails sent, conversations, waiting on you), then everything that needs a decision (including overdue follow-ups), contacts by stage, collector runs and what the pipeline is doing right now. Setup shows here until it's finished, then disappears.
+- **Ask Harvey** — chat with your pipeline, in sessions you can rename and delete. It answers from live data and acts through the same checks as the buttons; every action is logged in Activity.
 - **Outbox** — the decisions desk. Each email sits next to what Harvey knew when it wrote it: the company, how the address was found and verified, and the signals the email draws on. `J`/`K` to move, `A` approve, `E` edit, `R` reject.
 - **Conversations** — every reply in the context of the emails that led to it. Threads Harvey handed to you (a contract request, a reply it had no safe answer for) come first, with **Hand back to Harvey**, **Close** and **Reopen**.
+- **Tasks** — follow-ups by overdue, today, coming up and no date. Replies waiting on you are added on their own.
 
 **Pipeline**
+- **Deals** — the board from qualified to won, with values per stage
+- **Insights** — 7, 30 or 90 days: headline figures with trends and change against the period before, outreach activity, the conversion funnel, pipeline by stage, reach tiers, scores, lead types and places. Every chart has a table view.
 - **Signals** — the confirmation gate and the cohort builder
 - **Discover** — the provider menu with prices side by side, an estimate, then a run; plus reading the sites of companies found but not yet looked at
-- **Companies / Contacts** — everything found, searchable, with CSV export
+- **Companies** — every lead, filtered by lead type, business type, place, score, status, reach, contact details and star, with background **Score leads** and **Find people**, and **Export filtered** to an Excel workbook (leads plus their contacts, built in memory). Click one for its deal, contact card, score, people, notes, pitch brief and sources.
+- **Contacts** — every person found, searchable, with CSV export
 - **Campaigns** — each sequence Harvey wrote, who it's going to, and per-campaign feedback for the writer
 
 **System**
 - **Activity**, **Usage**, **Controls**, **Settings**, **Help**. Usage shows Claude or Codex quota gauges and per-agent token counts, with no dollar figures: you're on a subscription and aren't billed per token, so showing costs would be made up.
 
-| Outbox | Conversations |
+| Ask Harvey | Tasks |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/outbox-dark.png"><img alt="The outbox decisions desk: a drafted reply to an objection, with the company, contact, verification and signals beside it" src="docs/screenshots/outbox-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/conversations-dark.png"><img alt="A conversation Harvey handed back: the two emails sent, the prospect asking for a contract, and the Hand back to Harvey and Close buttons" src="docs/screenshots/conversations-light.png"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/chat-dark.png"><img alt="Ask Harvey: a chat session answering which starred dental leads haven't been emailed, as a table, then taking two actions" src="docs/screenshots/chat-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/tasks-dark.png"><img alt="Tasks: one overdue, five due today including replies Harvey added, and follow-ups coming up" src="docs/screenshots/tasks-light.png"></picture> |
+| **Companies** | **Outbox** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/companies-dark.png"><img alt="Companies: filters for lead type, business type, location, score, status, reach and contact details, starred leads with scores and status" src="docs/screenshots/companies-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/outbox-dark.png"><img alt="The outbox decisions desk: a drafted first email with the company, contact, verification and signals beside it" src="docs/screenshots/outbox-light.png"></picture> |
+| **Conversations** | **Settings → Appearance** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/conversations-dark.png"><img alt="A conversation Harvey handed back: the prospect asking for a contract and pricing, with Hand back to Harvey and Close" src="docs/screenshots/conversations-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png"><img alt="Settings, Appearance: theme (system, light or dark), accent colour and density" src="docs/screenshots/settings-light.png"></picture> |
 
-Colour is kept for meaning. The chrome is neutral and a single blue marks what you can act on. Status (waiting on you, done, failed, running) uses the same small set of tones in every tab, so "waiting on you" looks the same wherever it shows up. Figures are tabular, so columns line up and a changing number doesn't shift the layout.
+<p align="center"><img width="260" alt="On a phone: the sections in a drawer behind the menu button" src="docs/screenshots/mobile-menu.png"> &nbsp; <img width="260" alt="On a phone: the deals board, one column at a time" src="docs/screenshots/mobile-deals.png"></p>
 
-Appearance has three states: `auto` follows your OS and is the default, or pick light or dark from the button at the bottom of the sidebar. Dark mode uses the same layout with a different set of colour tokens.
+Colour is kept for meaning. The chrome is neutral and a single accent marks what you can act on. Status (waiting on you, done, failed, running) uses the same small set of tones in every tab, so "waiting on you" looks the same wherever it shows up. Charts use one hue for amounts, and a change is always shown with an arrow and a number, never colour alone. Figures are tabular, so columns line up and a changing number doesn't shift the layout.
+
+**Appearance** lives in Settings: the theme (System follows your computer or phone, or pick Light or Dark; the button at the bottom of the sidebar switches too), an accent colour (Cobalt, Indigo, Fuchsia or Graphite, each readable in both themes and none clashing with status colours) and density (Comfortable or Compact). They're applied before the page draws, so dark mode never flashes white, and saved in that browser only.
+
+<details><summary>A walkthrough of the approval flow (recorded before the redesign)</summary>
+
+![Harvey's dashboard: the Today screen, a conversation handed back for a human, approving a reply in the outbox, confirming a signal and building a cohort, searching contacts, then dark mode](docs/dashboard.gif)
+
+</details>
 
 ---
 
@@ -587,16 +655,22 @@ Two files, both plain text.
 ```yaml
 persona:      { name, company, role, email, tone }
 product:      { name, description, pricing, key_benefits, objection_responses, offer }
-icp:          { industries, titles, company_size, geography, hiring_signals, geo_coordinates }
+icp:          { industries, titles, company_size, geography, hiring_signals, geo_coordinates,
+                service_tags, focus_categories, skip_categories }
 channels:
   email:      { provider: gmail | microsoft | smtp | instantly, max_daily_sends, require_approval,
                 send_to_risky, max_bounce_rate, warmup, send_window }
-usage:        { max_daily_claude_percent, heartbeat_interval_minutes, quiet_hours }
+usage:        { max_daily_claude_percent, heartbeat_interval_minutes, quiet_hours,
+                contact_lookups_per_cycle }
+lead_scoring: { criteria: { <service>: "what a good client looks like" }, per_cycle, batch_size, star_at }
+people_research: { roles: { <service>: [titles that decide] }, per_cycle, people_per_company, min_score }
 brain:        { provider: claude | codex, model, reasoning_effort }   # optional; claude by default
 writer:       { humanizer }   # optional; true adds one editing pass per batch using ~/.claude/skills/humanizer/SKILL.md
 ```
 
 `max_daily_claude_percent` caps whichever subscription `brain.provider` uses (the name predates Codex support).
+
+`icp.service_tags` maps each service you sell to the business types it fits (`Digital marketing: [dentist, estate_agent]`), so every lead shows what it's for and the writer leads with it; `focus_categories` are prospected first and `skip_categories` never. Lead scoring, contact lookup and people research each collect only once their signal (`LEAD_SCORE`, `CONTACT_DETAILS`, `KEY_PEOPLE`) is confirmed, a few companies a cycle; the dashboard and Ask Harvey can run bigger batches in the background whenever you ask.
 
 If `harvey.local.yaml` exists it wins. It's gitignored, so a fork can carry real product configuration while the tracked `harvey.yaml` stays a template — nobody publishes their positioning and pricing by accident.
 
@@ -613,6 +687,9 @@ harvey status                # pipeline summary
 harvey usage                 # active provider's quota + per-agent tokens
 harvey outbox                # review queued email
 harvey export                # deliverable prospects → CSV
+harvey score [--service TAG] # score leads against lead_scoring.criteria; high scores are starred
+harvey contacts              # website/phone/email by web search for companies with no usable email
+harvey people [--starred]    # the people who decide at the best leads; confirmed ones become contacts
 harvey sending pause|resume  # kill switch
 harvey warmup [domain]       # is the sending domain ready? (SPF/DKIM/DMARC, age, blocklists, warmup)
 harvey trulyinbox connect    # connect TrulyInbox so Harvey reads the mailbox's warmup
@@ -759,6 +836,15 @@ harvey/
 ├── signals.py           # the 23-signal catalog Harvey proposes
 ├── pipeline.py          # DISCOVER → PROFILE chaining
 ├── gate.py              # deterministic pre-send checks
+├── leads.py             # the filtered lead list, reach tiers, Insights numbers, Excel export
+├── lead_scoring.py      # scores leads against your criteria (web search)
+├── contact_lookup.py    # a company's own phone/email/website, confirmed on its page
+├── people_research.py   # who decides: buyer and champion, confirmed on a page
+├── pitch_brief.py       # how to sell to one company
+├── pipeline_board.py    # deal stages, from Harvey's activity and yours
+├── tasks.py             # follow-ups, and a task for every reply waiting on you
+├── jobs.py              # background scoring and people research
+├── chat.py              # Ask Harvey: tools over the dashboard's own API
 ├── dashboard.py         # FastAPI JSON API
 ├── dashboard_auth.py    # dashboard token, Host/Origin checks
 ├── collectors/
@@ -770,7 +856,7 @@ harvey/
 
 skills/                  # ← the sales knowledge. Editable Markdown.
 prompts/                 # ← agent system prompts. Also editable Markdown.
-tests/                   # 242 tests
+tests/                   # ~2,800 tests
 ```
 
 ---
@@ -793,7 +879,7 @@ tests/                   # 242 tests
 
 ## Roadmap
 
-**Done:** heartbeat loop · observation data model with governed vocabulary · user-confirmed signal catalog · cohort builder · discovery provider menu with cost estimates · free HTTP profiler with agency detection · pattern-first email finding with honest status · native mail providers (Gmail API, Microsoft 365 via Graph, SMTP+IMAP) · outbox approval ladder · deterministic pre-send gate · bounce detection and kill switch · reply handling with intent classification · subscription quota tracking · website trainer · web dashboard · CSV export
+**Done:** heartbeat loop · observation data model with governed vocabulary · user-confirmed signal catalog · cohort builder · discovery provider menu with cost estimates · free HTTP profiler with agency detection · pattern-first email finding with honest status · native mail providers (Gmail API, Microsoft 365 via Graph, SMTP+IMAP) · outbox approval ladder · deterministic pre-send gate · bounce detection and kill switch · reply handling with intent classification · subscription quota tracking · website trainer · web dashboard · CSV export · lead scoring against your criteria · service tags · contact lookup and people research confirmed on source pages · reach tiers · pitch briefs · deals board · tasks with reply follow-ups · Ask Harvey chat · Excel export · Insights with period comparison · appearance settings
 
 **Next:** people enrichment from public registries · consent-gated voice callbacks · calendar integration for auto-booking · scheduled re-observation so signal *changes* trigger outreach · multi-product support
 
