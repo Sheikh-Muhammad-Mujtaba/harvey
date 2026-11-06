@@ -82,6 +82,10 @@ class ICPConfig(BaseModel):
     # are never prospected. Both empty → every company, in rotation order.
     focus_categories: list[str] = []
     skip_categories: list[str] = []
+    # Which of your services each lead is for, by category, e.g.
+    #   {"ERP": ["wholesale", "works"], "Digital marketing": ["dentist"]}
+    # A company gets every tag listing its category; see service_tags.py.
+    service_tags: dict[str, list[str]] = {}
 
 
 class WarmupConfig(BaseModel):
@@ -646,6 +650,22 @@ class WriterConfig(BaseModel):
     # or HARVEY_HUMANIZER_SKILL). Off by default: installing the skill for
     # your own Claude Code use never changes what Harvey sends on its own.
     humanizer: bool = False
+
+
+class LeadScoringConfig(BaseModel):
+    """Rank leads against what you need from a client (see lead_scoring.py).
+
+    ``criteria`` maps a service tag (icp.service_tags) to what makes a good
+    client for it, in plain words: budget, kind of brand, how likely to
+    close. Only services listed here are scored. Once the LEAD_SCORE signal
+    is confirmed, each prospecting cycle scores ``per_cycle`` companies (one
+    Claude call with web search per ``batch_size``); a score at or above
+    ``star_at`` stars the lead unless you set its star yourself.
+    """
+    criteria: dict[str, str] = {}
+    per_cycle: int = Field(default=5, ge=0, le=50)
+    batch_size: int = Field(default=5, ge=1, le=10)
+    star_at: int = Field(default=75, ge=0, le=100)
 
 
 class HarveyConfig(BaseModel):

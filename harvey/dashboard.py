@@ -27,6 +27,7 @@ logger = logging.getLogger("harvey.dashboard")
 
 from harvey import dashboard_auth as auth  # noqa: E402
 from harvey import dashboard_login as login  # noqa: E402
+from harvey import service_tags  # noqa: E402
 from harvey.paths import PROJECT_ROOT  # noqa: E402
 from harvey.pidfile import LOCK_FILE, loop_lock_held, pid_alive  # noqa: E402
 from harvey.textio import read_user_text  # noqa: E402
@@ -610,7 +611,20 @@ async def get_companies():
              ORDER BY o.observed_at DESC LIMIT 1) as contact_card
         FROM companies c ORDER BY c.updated_at DESC, c.created_at DESC LIMIT 300
     """)
+    config = _config_or_none()
+    for r in rows:
+        r["service_tags"] = service_tags.tags_for(r.get("industry") or "", config)
     return rows
+
+
+def _config_or_none():
+    """The config Harvey reads, or None when it can't be loaded (tags are
+    then simply absent rather than the page failing)."""
+    try:
+        from harvey.config import load_config
+        return load_config()
+    except Exception:
+        return None
 
 
 @app.get("/api/companies/{company_id}/contacts")
@@ -1000,7 +1014,13 @@ async def get_usage():
 
 @app.get("/api/prospects")
 async def get_prospects():
-    rows = await query_db("SELECT * FROM prospects ORDER BY created_at DESC LIMIT 200")
+    rows = await query_db(
+        "SELECT p.*, c.industry AS company_industry FROM prospects p "
+        "LEFT JOIN companies c ON c.id = p.company_id ORDER BY p.created_at DESC LIMIT 200")
+    config = _config_or_none()
+    for r in rows:
+        r["service_tags"] = service_tags.tags_for_prospect(
+            r.get("industry") or "", r.pop("company_industry", "") or "", config)
     # Someone whose opt-out was undone keeps a way to see what happened.
     undone = {r["pid"] for r in await query_db(
         "SELECT DISTINCT json_extract(details_json, '$.prospect_id') AS pid FROM actions "

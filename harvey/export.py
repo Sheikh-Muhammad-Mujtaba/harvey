@@ -10,6 +10,7 @@ import csv
 import io
 import logging
 
+from harvey import service_tags
 from harvey.gate import do_not_contact_match
 from harvey.state import StateManager
 
@@ -21,6 +22,7 @@ CSV_COLUMNS = [
     "email", "first_name", "last_name", "company_name", "title",
     "website", "linkedin_url", "industry", "personalization",
     "email_status", "score", "seniority", "source", "status", "created_at",
+    "service",
 ]
 
 DEFAULT_EMAIL_STATUSES = ["verified", "risky"]
@@ -62,10 +64,11 @@ async def collect_prospects(
             where.append(f"status IN ({placeholders})")
             params.extend(statuses)
 
-    sql = "SELECT * FROM prospects"
+    sql = ("SELECT prospects.*, companies.industry AS company_industry FROM prospects "
+           "LEFT JOIN companies ON companies.id = prospects.company_id")
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY score DESC, created_at DESC"
+    sql += " ORDER BY score DESC, prospects.created_at DESC"
 
     async with aiosqlite.connect(state.db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -96,6 +99,8 @@ async def collect_prospects(
             "source": r.get("source", ""),
             "status": r.get("status", ""),
             "created_at": r.get("created_at", ""),
+            "service": ", ".join(service_tags.tags_for_prospect(
+                r.get("industry") or "", r.get("company_industry") or "", config)),
         })
     return out
 

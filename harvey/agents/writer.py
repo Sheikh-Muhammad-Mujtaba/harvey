@@ -14,6 +14,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from harvey import service_tags
 from harvey.brain import Brain
 from harvey.config import HarveyConfig
 from harvey.humanize import humanize, humanizer_enabled
@@ -357,6 +358,10 @@ class Writer:
                 company = await self.state.get_company(prospect.company_id)
             except Exception:
                 company = None
+        services = service_tags.tags_for_prospect(
+            prospect.industry or "", getattr(company, "industry", "") or "", self.config)
+        if services:
+            facts.append(f"- Service to lead with: {' and '.join(services)}")
         if company:
             if company.description:
                 facts.append(f"- What the company says about itself: {company.description}")
@@ -459,6 +464,8 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
         # Build context about the prospects
         prospect_summary = "\n".join(
             f"- {p.full_name()}, {p.title} at {short_company_name(p.company)}"
+            + (f" | Service to lead with: {' and '.join(tags)}"
+               if (tags := service_tags.tags_for(p.industry or "", self.config)) else "")
             + (f" | Notes: {p.personalization_notes}" if p.personalization_notes else "")
             for p in prospects[:5]  # Show sample for context
         )
