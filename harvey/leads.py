@@ -427,3 +427,63 @@ def to_xlsx(rows: list[dict], contacts: list[dict], filters: dict, generated_at:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+# ── Insights: the numbers behind the dashboard's charts ──
+
+SCORE_BANDS = [("0-19", 0, 19), ("20-39", 20, 39), ("40-59", 40, 59), ("60-74", 60, 74),
+               ("75-100", 75, 100)]
+
+
+async def insights(state, config) -> dict:
+    async with state._connect() as db:
+        async def one(sql, params=()):
+            cur = await db.execute(sql, params)
+            return await cur.fetchall()
+
+        status_rows = dict(await one(f"SELECT lead_status, COUNT(*) FROM ({_BASE}) GROUP BY 1"))
+        totals = (await one(
+            f"""SELECT COUNT(*), COALESCE(SUM(starred), 0), COUNT(lead_score),
+                       ROUND(AVG(lead_score)), COALESCE(SUM(COALESCE(phone, '') != ''), 0),
+                       COALESCE(SUM(COALESCE(domain, '') != ''), 0)
+                FROM ({_BASE})"""))[0]
+        industries = await one("SELECT LOWER(industry), COUNT(*) FROM companies GROUP BY 1")
+        cities = await one(
+            "SELECT TRIM(SUBSTR(location, 1, INSTR(location || ',', ',') - 1)) AS city, COUNT(*) "
+            "FROM companies WHERE COALESCE(location, '') != '' GROUP BY LOWER(city) "
+            "ORDER BY 2 DESC LIMIT 10")
+        bands = []
+        for label, lo, hi in SCORE_BANDS:
+            n = (await one("SELECT COUNT(*) FROM companies WHERE lead_score BETWEEN ? AND ?",
+                           (lo, hi)))[0][0]
+            bands.append({"band": label, "count": n})
+        cur = await db.execute(
+            f"""{_BASE} WHERE lead_score IS NOT NULL
+                ORDER BY starred DESC, lead_score DESC LIMIT 8""")
+        cols = [d[0] for d in cur.description]
+        top = [dict(zip(cols, r)) for r in await cur.fetchall()]
+
+    tag_counts: dict[str, int] = {}
+    for industry, n in industries:
+        tags = service_tags.tags_for(industry or "", config)
+        key = " + ".join(tags) if tags else "Not tagged"
+        tag_counts[key] = tag_counts.get(key, 0) + n
+    leads, starred, scored, avg, phones, sites = totals
+    reachable = sum(status_rows.get(k, 0) for k in ("email_found", "queued", "contacted", "replied"))
+    return {
+        "kpis": {"leads": leads, "starred": starred, "scored": scored,
+                 "avg_score": int(avg) if avg is not None else None,
+                 "with_email": reachable, "with_phone": phones, "with_website": sites,
+                 "contacted": status_rows.get("contacted", 0) + status_rows.get("replied", 0),
+                 "replied": status_rows.get("replied", 0),
+                 "star_at": getattr(getattr(config, "lead_scoring", None), "star_at", 75)},
+        "status": [{"key": k, "label": label, "count": status_rows.get(k, 0)} for k, label in STATUSES],
+        "lead_types": sorted(({"label": k, "count": v} for k, v in tag_counts.items()),
+                             key=lambda x: (x["label"] == "Not tagged", -x["count"])),
+        "locations": [{"label": c, "count": n} for c, n in cities if c],
+        "score_bands": bands,
+        "top": [{"id": r["id"], "name": r["name"], "score": r["lead_score"], "starred": r["starred"],
+                 "status": r["lead_status"], "phone": r["phone"], "location": r["location"],
+                 "service_tags": service_tags.tags_for(r.get("industry") or "", config)}
+                for r in top],
+    }

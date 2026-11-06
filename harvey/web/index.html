@@ -36,6 +36,9 @@
     <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M6.3 17.7l2.5-2.5M15.2 8.8l2.5-2.5"/></symbol>
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-insights" viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
   </defs>
 </svg>
@@ -92,6 +95,7 @@
     </div>
     <div class="nav-group">
       <div class="nav-label">Pipeline</div>
+      <button onclick="showTab('insights', this)"><svg class="icon" aria-hidden="true"><use href="#i-insights"/></svg><span class="label">Insights</span></button>
       <button onclick="showTab('signals', this)"><svg class="icon" aria-hidden="true"><use href="#i-signals"/></svg><span class="label">Signals</span><span class="nav-count" id="nav-signals"></span></button>
       <button onclick="showTab('discover', this)"><svg class="icon" aria-hidden="true"><use href="#i-discover"/></svg><span class="label">Discover</span></button>
       <button onclick="showTab('companies', this)"><svg class="icon" aria-hidden="true"><use href="#i-companies"/></svg><span class="label">Companies</span></button>
@@ -169,22 +173,50 @@
   <div class="section-head">
     <div>
       <h2>Ask Harvey</h2>
-      <p>Ask about your leads, drafts and results, or tell Harvey what to do: approve or rewrite
-         drafts, run discovery, change settings, pause sending. It acts straight away and
-         logs every action in Activity.</p>
-    </div>
-    <div class="page-actions">
-      <button class="btn btn-ghost btn-sm" id="chat-clear" onclick="clearChat()">Clear chat</button>
+      <p>Ask about your leads, drafts and results, or tell Harvey what to do: research a business,
+         score and star leads, export a sheet, approve or rewrite drafts, change settings. It acts
+         straight away and logs every action in Activity.</p>
     </div>
   </div>
-  <div class="chat-log" id="chat-log" aria-live="polite"></div>
-  <form class="chat-form" onsubmit="sendChat(event)">
-    <textarea class="form-input" id="chat-input" rows="2" maxlength="4000"
-              placeholder="e.g. How many verified emails do we have in Dubai?"
-              onkeydown="chatKey(event)"></textarea>
-    <button class="btn btn-primary" id="chat-send" type="submit">Send</button>
-    <button class="btn btn-secondary" id="chat-stop" type="button" onclick="stopChat()" hidden>Stop</button>
-  </form>
+  <div class="chat-layout">
+    <aside class="chat-sessions" aria-label="Chats">
+      <button class="btn btn-primary btn-sm chat-new" onclick="newChat()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New chat</button>
+      <div class="chat-session-list" id="chat-session-list"></div>
+    </aside>
+    <div class="chat-main">
+      <div class="chat-title" id="chat-title"></div>
+      <div class="chat-log" id="chat-log" aria-live="polite"></div>
+      <form class="chat-form" onsubmit="sendChat(event)">
+        <textarea class="form-input" id="chat-input" rows="2" maxlength="4000"
+                  placeholder="e.g. Which starred leads have a phone number?"
+                  onkeydown="chatKey(event)"></textarea>
+        <button class="btn btn-primary" id="chat-send" type="submit">Send</button>
+        <button class="btn btn-secondary" id="chat-stop" type="button" onclick="stopChat()" hidden>Stop</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Insights: charts over the lead list -->
+<div id="insights" class="section">
+  <div class="section-head">
+    <div>
+      <h2>Insights</h2>
+      <p>Where your leads stand: how many Harvey can reach, how they score, what they're for and
+         where they are. Hover a bar for its numbers; click a lead to open it.</p>
+    </div>
+  </div>
+  <div class="viz-kpis" id="insights-kpis"></div>
+  <div class="viz-grid">
+    <div class="card viz-card viz-wide"><div class="card-title">Leads by status</div><div id="viz-status"></div></div>
+    <div class="card viz-card"><div class="card-title">Lead scores</div><div id="viz-scores"></div></div>
+    <div class="card viz-card"><div class="card-title">Emails sent, last 14 days</div><div id="viz-sent"></div></div>
+    <div class="card viz-card"><div class="card-title">Lead types</div><div id="viz-types"></div></div>
+    <div class="card viz-card"><div class="card-title">Top locations</div><div id="viz-locations"></div></div>
+    <div class="card viz-card viz-wide flush"><div class="card-head"><h3>Top leads</h3>
+      <span class="meta"><a href="#" onclick="goTab('companies');return false">All companies</a></span></div>
+      <div id="viz-top"></div></div>
+  </div>
 </div>
 
 <div id="signals" class="section">

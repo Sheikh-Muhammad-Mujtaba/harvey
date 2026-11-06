@@ -1117,3 +1117,113 @@ a.btn, a.btn:hover { text-decoration: none; }
 @media (max-width: 640px) {
   .lead-filters .form-input { max-width: none; flex-basis: 100%; }
 }
+
+/* ── Ask Harvey: sessions beside the conversation ── */
+.chat-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.chat-sessions {
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-border);
+  padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2);
+  max-height: calc(100vh - 230px); position: sticky; top: var(--sp-4);
+}
+.chat-new { justify-content: center; }
+.chat-session-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -4px; padding: 0 4px; }
+.chat-sessions-empty { font-size: var(--fs-ui); padding: var(--sp-2); }
+.chat-session { display: flex; align-items: center; border-radius: var(--r-sm); }
+.chat-session:hover, .chat-session.on { background: var(--surface-2); }
+.chat-session.on { box-shadow: inset 2px 0 0 var(--accent); }
+.chat-session-open {
+  flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 8px 6px 8px 10px;
+  cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 2px; font: inherit;
+}
+.chat-session-open .t {
+  font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 6px;
+}
+.chat-session-open .m { font-size: var(--fs-caption); color: var(--text-3); }
+.chat-session-actions { display: flex; gap: 2px; padding-right: 4px; opacity: 0; transition: opacity .15s; }
+.chat-session:hover .chat-session-actions, .chat-session.on .chat-session-actions,
+.chat-session-actions:focus-within { opacity: 1; }
+.chat-session-actions .icon-btn { padding: 4px; line-height: 0; }
+.chat-session-actions .icon { width: 14px; height: 14px; }
+.chat-title { font-size: var(--fs-ui); font-weight: 600; color: var(--text-2); margin: 0 0 var(--sp-2) 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-main .chat-log { max-height: calc(100vh - 360px); }
+@media (max-width: 900px) {
+  .chat-layout { grid-template-columns: 1fr; }
+  .chat-sessions { position: static; max-height: 220px; }
+}
+
+/* ── Insights charts ── */
+.viz-root, :root {
+  --viz-1: #2a78d6;
+  --viz-r1: #86b6ef; --viz-r2: #5598e7; --viz-r3: #2a78d6; --viz-r4: #1c5cab; --viz-r5: #104281;
+  --viz-r0: #b4b4bc;
+}
+:root[data-theme='dark'] {
+  --viz-1: #3987e5;
+  --viz-r1: #256abf; --viz-r2: #3987e5; --viz-r3: #6da7ec; --viz-r4: #9ec5f4; --viz-r5: #cde2fb;
+  --viz-r0: #55555d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    --viz-1: #3987e5;
+    --viz-r1: #256abf; --viz-r2: #3987e5; --viz-r3: #6da7ec; --viz-r4: #9ec5f4; --viz-r5: #cde2fb;
+    --viz-r0: #55555d;
+  }
+}
+.viz-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.viz-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.viz-grid .card { margin-bottom: 0; }
+.viz-wide { grid-column: 1 / -1; }
+.viz-empty, .viz-note { font-size: var(--fs-ui); margin-top: var(--sp-3); }
+.viz-note b { color: var(--text-2); font-weight: 500; }
+
+.seg-bar { display: flex; gap: 2px; height: 28px; margin-bottom: var(--sp-4); }
+.seg-bar .seg { min-width: 4px; border-radius: 4px; outline-offset: 2px; }
+.seg-bar .seg:hover { filter: brightness(1.08); }
+.r0 { background: var(--viz-r0); } .r1 { background: var(--viz-r1); } .r2 { background: var(--viz-r2); }
+.r3 { background: var(--viz-r3); } .r4 { background: var(--viz-r4); } .r5 { background: var(--viz-r5); }
+.legend-key i.r0, .legend-key i.r1, .legend-key i.r2, .legend-key i.r3, .legend-key i.r4, .legend-key i.r5 {
+  display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px;
+}
+
+.hbars { display: flex; flex-direction: column; gap: 6px; }
+.hbar {
+  display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; align-items: center; gap: var(--sp-3);
+  padding: 3px 4px; border-radius: var(--r-xs); font-size: var(--fs-ui);
+}
+.hbar[role='button'] { cursor: pointer; }
+.hbar:hover, .hbar:focus-visible { background: var(--surface-2); outline: none; }
+.hbar-label { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar-track { height: 14px; display: flex; align-items: center; }
+.hbar-fill { display: block; height: 14px; background: var(--viz-1); border-radius: 0 4px 4px 0; }
+.hbar-val { color: var(--text); font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
+
+.vcols { display: flex; align-items: stretch; gap: 2px; height: 180px; }
+.vcol { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  position: relative; border-radius: var(--r-xs); outline-offset: 1px; }
+.vcol:hover, .vcol:focus-visible { background: var(--surface-2); outline: none; }
+.vcol-bar { width: min(24px, 70%); background: var(--viz-r2); border-radius: 4px 4px 0 0; flex: none; }
+.vcol.marked .vcol-bar { background: var(--viz-r4); }
+.vcol-val { font-size: var(--fs-caption); color: var(--text-2); height: 16px; line-height: 16px; flex: none; }
+.vcol-label { font-size: var(--fs-caption); color: var(--text-3); margin-top: 6px; height: 14px; white-space: nowrap; }
+.vcols { border-bottom: 1px solid var(--line); }
+
+.viz-table { margin-top: var(--sp-3); font-size: var(--fs-caption); color: var(--text-3); }
+.viz-table summary { cursor: pointer; }
+.viz-table table { margin-top: var(--sp-2); width: 100%; font-size: var(--fs-ui); }
+.viz-table td.num { text-align: right; }
+.viz-tip {
+  position: fixed; z-index: 1000; display: none; pointer-events: none; max-width: 260px;
+  background: var(--text); color: var(--bg); font-size: var(--fs-caption); line-height: 1.4;
+  padding: 6px 9px; border-radius: var(--r-sm); box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+}
+.viz-tip b { font-weight: 600; }
+.star-cell { width: 28px; text-align: center; }
+.star-on { color: #D99A00; font-size: 16px; }
+@media (max-width: 900px) {
+  .viz-grid, .viz-kpis { grid-template-columns: 1fr; }
+}
+
+/* A button's display rule must not beat the hidden attribute (Stop showed when idle). */
+.chat-form [hidden] { display: none !important; }

@@ -24,6 +24,7 @@ import re
 import sqlite3
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -50,6 +51,16 @@ CHAT_DDL = """CREATE TABLE IF NOT EXISTS chat_messages (
     meta TEXT DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )"""
+
+SESSIONS_DDL = """CREATE TABLE IF NOT EXISTS chat_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)"""
+SESSION_TITLE_CHARS = 60
+# Millisecond timestamps: chats used within the same second still sort right.
+NOW_MS = "strftime('%Y-%m-%d %H:%M:%f', 'now')"
 
 # Settings the chat can't change with set_setting: sending mode has its own
 # tool (autopilot needs the operator to say so), and the model provider is
@@ -489,29 +500,103 @@ TOOLS = _tools()
 # ── Storage ──
 
 class ChatStore:
+    """Chat sessions and their messages. Messages from before sessions
+    existed are gathered into one "Earlier chat" session."""
+
     def __init__(self, state):
         self.state = state
         self._ready = False
 
     async def _ensure(self, db):
-        if not self._ready:
-            await db.execute(CHAT_DDL)
-            await db.commit()
-            self._ready = True
+        if self._ready:
+            return
+        await db.execute(CHAT_DDL)
+        await db.execute(SESSIONS_DDL)
+        cur = await db.execute("PRAGMA table_info(chat_messages)")
+        if "session_id" not in [r[1] for r in await cur.fetchall()]:
+            await db.execute("ALTER TABLE chat_messages ADD COLUMN session_id TEXT DEFAULT ''")
+        cur = await db.execute("SELECT COUNT(*) FROM chat_messages WHERE COALESCE(session_id, '') = ''")
+        if (await cur.fetchone())[0]:
+            sid = uuid.uuid4().hex[:12]
+            await db.execute("INSERT INTO chat_sessions (id, title) VALUES (?, 'Earlier chat')", (sid,))
+            await db.execute("UPDATE chat_messages SET session_id = ? WHERE COALESCE(session_id, '') = ''",
+                             (sid,))
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session "
+                         "ON chat_messages(session_id, id)")
+        await db.commit()
+        self._ready = True
 
-    async def add(self, role: str, content: str, meta: dict | None = None):
+    async def sessions(self) -> list[dict]:
         async with self.state._connect() as db:
             await self._ensure(db)
-            await db.execute("INSERT INTO chat_messages (role, content, meta) VALUES (?, ?, ?)",
-                             (role, content, json.dumps(meta or {})))
+            cur = await db.execute(
+                """SELECT s.id, s.title, s.created_at, s.updated_at,
+                          (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id)
+                   FROM chat_sessions s ORDER BY s.updated_at DESC, s.created_at DESC""")
+            rows = await cur.fetchall()
+        return [{"id": r[0], "title": r[1] or "New chat", "created_at": r[2], "updated_at": r[3],
+                 "messages": r[4]} for r in rows]
+
+    async def session(self, session_id: str) -> dict | None:
+        return next((s for s in await self.sessions() if s["id"] == session_id), None)
+
+    async def latest(self) -> str:
+        sessions = await self.sessions()
+        return sessions[0]["id"] if sessions else ""
+
+    async def create_session(self, title: str = "") -> str:
+        sid = uuid.uuid4().hex[:12]
+        async with self.state._connect() as db:
+            await self._ensure(db)
+            await db.execute(f"INSERT INTO chat_sessions (id, title, created_at, updated_at) "
+                             f"VALUES (?, ?, {NOW_MS}, {NOW_MS})",
+                             (sid, title.strip()[:SESSION_TITLE_CHARS]))
+            await db.commit()
+        return sid
+
+    async def rename(self, session_id: str, title: str) -> bool:
+        title = " ".join(str(title or "").split())[:SESSION_TITLE_CHARS]
+        if not title:
+            return False
+        async with self.state._connect() as db:
+            await self._ensure(db)
+            cur = await db.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def delete_session(self, session_id: str) -> bool:
+        async with self.state._connect() as db:
+            await self._ensure(db)
+            await db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            cur = await db.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def add(self, role: str, content: str, meta: dict | None = None, session_id: str = ""):
+        session_id = session_id or await self.latest() or await self.create_session()
+        async with self.state._connect() as db:
+            await self._ensure(db)
+            await db.execute(
+                "INSERT INTO chat_messages (role, content, meta, session_id) VALUES (?, ?, ?, ?)",
+                (role, content, json.dumps(meta or {}), session_id))
+            # A new chat is named after its first question.
+            title = " ".join(content.split())[:SESSION_TITLE_CHARS] if role == "user" else ""
+            await db.execute(
+                f"UPDATE chat_sessions SET updated_at = {NOW_MS}, "
+                "title = CASE WHEN COALESCE(title, '') = '' AND ? != '' THEN ? ELSE title END "
+                "WHERE id = ?", (title, title, session_id))
             await db.commit()
 
-    async def recent(self, limit: int = 100) -> list[dict]:
+    async def recent(self, session_id: str = "", limit: int = 100) -> list[dict]:
+        """A session's last messages, oldest first (the latest session by default)."""
+        session_id = session_id or await self.latest()
+        if not session_id:
+            return []
         async with self.state._connect() as db:
             await self._ensure(db)
             cur = await db.execute(
                 "SELECT id, role, content, meta, created_at FROM chat_messages "
-                "ORDER BY id DESC LIMIT ?", (limit,))
+                "WHERE session_id = ? ORDER BY id DESC LIMIT ?", (session_id, limit))
             rows = await cur.fetchall()
         out = []
         for r in reversed(rows):
@@ -523,10 +608,11 @@ class ChatStore:
                         "created_at": r[4]})
         return out
 
-    async def clear(self):
+    async def clear(self, session_id: str = ""):
+        session_id = session_id or await self.latest()
         async with self.state._connect() as db:
             await self._ensure(db)
-            await db.execute("DELETE FROM chat_messages")
+            await db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
             await db.commit()
 
 
@@ -604,7 +690,7 @@ or, when you're done,
 
 
 class ChatAgent:
-    """One conversation, one turn at a time."""
+    """Many conversations (sessions), one turn at a time across them."""
 
     def __init__(self, state, app, token: Callable[[], str], db_path: Path,
                  brain_factory: Callable[[Any], Any] | None = None):
@@ -616,23 +702,29 @@ class ChatAgent:
         self.brain_factory = brain_factory
         self.task: asyncio.Task | None = None
         self.status = ""
+        self.session_id = ""  # the session of the turn in progress (or the last one)
 
     @property
     def busy(self) -> bool:
         return bool(self.task and not self.task.done())
 
-    async def start(self, message: str) -> str:
-        """"" when the turn started, else why not."""
+    async def start(self, message: str, session_id: str = "") -> str:
+        """"" when the turn started, else why not. Without a session (or
+        with one that no longer exists) a new one is opened; self.session_id
+        says which."""
         message = (message or "").strip()
         if not message:
             return "Type a message first."
         if len(message) > MAX_MESSAGE_CHARS:
             return f"Keep it under {MAX_MESSAGE_CHARS} characters."
         if self.busy:
-            return "Harvey is still answering the last message."
-        await self.store.add("user", message)
+            return "Harvey is still answering in another message. Wait for it, or stop it."
+        if not session_id or not await self.store.session(session_id):
+            session_id = await self.store.create_session()
+        self.session_id = session_id
+        await self.store.add("user", message, session_id=session_id)
         self.status = "Thinking"
-        self.task = asyncio.create_task(self._turn(message))
+        self.task = asyncio.create_task(self._turn(message, session_id))
         return ""
 
     def stop(self) -> bool:
@@ -647,7 +739,7 @@ class ChatAgent:
         from harvey.brain import Brain
         return Brain(self.state, config.brain)
 
-    async def _turn(self, message: str):
+    async def _turn(self, message: str, session_id: str):
         steps: list[dict] = []
         started = time.monotonic()
         try:
@@ -655,7 +747,7 @@ class ChatAgent:
             config = load_config()
             brain = self._brain(config)
             schema = await asyncio.to_thread(schema_summary, self.db_path)
-            history = (await self.store.recent(HISTORY_MESSAGES + 1))[:-1]
+            history = (await self.store.recent(session_id, HISTORY_MESSAGES + 1))[:-1]
             transport = httpx.ASGITransport(app=self.app)
             async with httpx.AsyncClient(
                     transport=transport, base_url="http://127.0.0.1:5555", timeout=120,
@@ -673,7 +765,7 @@ class ChatAgent:
                           for s in steps],
                 "seconds": round(time.monotonic() - started, 1)}
         try:
-            await self.store.add("assistant", reply, meta)
+            await self.store.add("assistant", reply, meta, session_id=session_id)
         finally:
             self.status = ""
 
@@ -714,6 +806,12 @@ class ChatAgent:
         return ("I ran out of steps before finishing. Here's what I did: "
                 + ", ".join(s["tool"] for s in steps) + ". Ask me to carry on.")
 
-    async def snapshot(self) -> dict:
-        return {"messages": await self.store.recent(), "busy": self.busy,
-                "status": self.status if self.busy else ""}
+    async def snapshot(self, session_id: str = "") -> dict:
+        session_id = session_id or await self.store.latest()
+        session = await self.store.session(session_id) if session_id else None
+        here = self.busy and self.session_id == session_id
+        return {"session": session,
+                "messages": await self.store.recent(session_id) if session else [],
+                "busy": here, "busy_elsewhere": self.busy and not here,
+                "busy_session": self.session_id if self.busy else "",
+                "status": self.status if here else ""}

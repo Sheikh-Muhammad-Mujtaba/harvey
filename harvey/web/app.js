@@ -426,6 +426,7 @@ function loadCurrentTab() {
   switch (currentTab) {
     case 'today': loadLiveStatus(); loadToday(); loadTrend(); loadFunnel(); loadSetupStatus(); loadRuns(); loadTodayActivity(); break;
     case 'chat': loadChat(); break;
+    case 'insights': loadInsights(); break;
     case 'signals': loadSignals(); break;
     case 'discover': loadDiscoverProviders(); break;
     case 'companies': if (!companyDrill) loadCompanies(); break;
@@ -481,26 +482,71 @@ function chatBubble(m) {
   const body = mine ? '<p>' + escHtml(m.content).replace(/\n/g, '<br>') + '</p>' : chatMarkup(m.content);
   // Only the lead export's own link: the file is built when it's clicked.
   const downloads = steps.filter(s => s.download && /^\/api\/leads\.(xlsx|csv)(\?|$)/.test(s.download.download_url || ''))
-    .map(s => '<button class="btn btn-secondary btn-sm chat-download" onclick="downloadCsv(' + jsq(s.download.download_url) +
-      ', ' + jsq(s.download.filename || 'leads.xlsx') + ', this)">' + icon('download') + 'Download Excel (' +
+    .map(s => '<button class="btn btn-secondary btn-sm chat-download" onclick="downloadCsv(' +
+      jsq(s.download.download_url.replace(/^\/api\/leads\.csv/, '/api/leads.xlsx')) +
+      ', ' + jsq((s.download.filename || 'leads.xlsx').replace(/\.csv$/, '.xlsx')) + ', this)">' + icon('download') + 'Download Excel (' +
       (s.download.count || 0) + ' lead' + (s.download.count === 1 ? '' : 's') + ')</button>').join('');
   return '<div class="chat-msg ' + (mine ? 'me' : 'harvey') + '"><div class="chat-bubble">' + body + '</div>' +
     (downloads ? '<div class="chat-downloads">' + downloads + '</div>' : '') + trail + '</div>';
 }
 
+// The chat being shown. Remembered per browser so a reload comes back to it.
+let _chatSession = '';
+try { _chatSession = localStorage.getItem('harvey-chat-session') || ''; } catch { /* private mode */ }
+let _chatSessions = [];
+
+function rememberChat(id) {
+  _chatSession = id || '';
+  try { localStorage.setItem('harvey-chat-session', _chatSession); } catch { /* ignore */ }
+}
+
+function renderChatSessions(busySession) {
+  const el = document.getElementById('chat-session-list');
+  if (!el) return;
+  if (!_chatSessions.length) {
+    el.innerHTML = '<p class="muted chat-sessions-empty">No chats yet. Ask something to start one.</p>';
+    return;
+  }
+  el.innerHTML = _chatSessions.map(c => {
+    const on = c.id === _chatSession;
+    return '<div class="chat-session' + (on ? ' on' : '') + '">' +
+      '<button class="chat-session-open" aria-current="' + on + '" onclick="selectChat(' + jsq(c.id) + ')">' +
+        '<span class="t">' + (c.id === busySession ? '<span class="chat-dot" aria-label="Answering"></span>' : '') +
+          escHtml(c.title) + '</span>' +
+        '<span class="m">' + relTime(c.updated_at) + ' · ' + c.messages + ' message' + (c.messages === 1 ? '' : 's') + '</span>' +
+      '</button>' +
+      '<span class="chat-session-actions">' +
+        '<button class="icon-btn" title="Rename" aria-label="Rename ' + escHtml(c.title) + '" onclick="renameChat(' + jsq(c.id) + ')">' + icon('pen') + '</button>' +
+        '<button class="icon-btn" title="Delete" aria-label="Delete ' + escHtml(c.title) + '" onclick="deleteChat(' + jsq(c.id) + ')">' + icon('trash') + '</button>' +
+      '</span></div>';
+  }).join('');
+}
+
+async function loadChatSessions() {
+  const data = await api('/api/chat/sessions');
+  if (!data) return '';
+  _chatSessions = data.sessions || [];
+  if (_chatSession && !_chatSessions.some(c => c.id === _chatSession)) rememberChat('');
+  renderChatSessions(data.busy_session || '');
+  return data.busy_session || '';
+}
+
 function renderChat(data) {
   const msgs = data.messages || [];
   const last = msgs.length ? msgs[msgs.length - 1].id : 0;
-  const key = [msgs.length, last, data.busy, data.status].join('|');
-  document.getElementById('chat-send').disabled = !!data.busy;
-  document.getElementById('chat-stop').hidden = !data.busy;
-  document.getElementById('chat-clear').disabled = !!data.busy;
+  const key = [(data.session || {}).id, msgs.length, last, data.busy, data.busy_elsewhere, data.status].join('|');
+  const blocked = !!(data.busy || data.busy_elsewhere);
+  document.getElementById('chat-send').disabled = blocked;
+  document.getElementById('chat-stop').hidden = !blocked;
+  document.getElementById('chat-title').textContent = data.session ? data.session.title : 'New chat';
   if (key === _chatShown) return;
   _chatShown = key;
   const log = document.getElementById('chat-log');
   if (!msgs.length && !data.busy) {
     log.innerHTML = emptyState(icon('sparkle'), 'Ask Harvey anything',
-      'Try <i>What\'s waiting in the Outbox?</i>, <i>Which UK clinics have no online booking?</i> or <i>Pause sending until Monday.</i>');
+      'Try <i>Score 10 marketing leads</i>, <i>Who owns Acme Dental? Add them as a contact</i> or ' +
+      '<i>Give me an Excel of starred leads with a phone</i>.' +
+      (data.busy_elsewhere ? '<br><br>Harvey is answering in another chat; you can send once it finishes.' : ''));
     return;
   }
   log.innerHTML = msgs.map(chatBubble).join('') + (data.busy
@@ -512,7 +558,8 @@ function renderChat(data) {
 
 async function loadChat() {
   clearTimeout(_chatPoll);
-  const data = await api('/api/chat');
+  const busySession = await loadChatSessions();
+  const data = await api('/api/chat' + (_chatSession ? '?session=' + encodeURIComponent(_chatSession) : ''));
   const log = document.getElementById('chat-log');
   if (!data) { log.innerHTML = offlineState(); _chatShown = ''; return; }
   if (data.error) {
@@ -520,8 +567,46 @@ async function loadChat() {
     _chatShown = '';
     return;
   }
+  if (data.session && data.session.id !== _chatSession) { rememberChat(data.session.id); renderChatSessions(busySession); }
   renderChat(data);
-  if (data.busy && currentTab === 'chat') _chatPoll = setTimeout(loadChat, 1500);
+  if ((data.busy || data.busy_elsewhere) && currentTab === 'chat') _chatPoll = setTimeout(loadChat, 1500);
+}
+
+function selectChat(id) {
+  rememberChat(id);
+  _chatShown = '';
+  loadChat();
+}
+
+async function newChat() {
+  const r = await api('/api/chat/sessions', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t start a chat.', 'error'); return; }
+  rememberChat(r.session.id);
+  _chatShown = '';
+  await loadChat();
+  document.getElementById('chat-input').focus();
+}
+
+async function renameChat(id) {
+  const c = _chatSessions.find(x => x.id === id);
+  const title = prompt('Name this chat:', c ? c.title : '');
+  if (!title || !title.trim()) return;
+  const r = await api('/api/chat/sessions/' + encodeURIComponent(id) + '/rename', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title}),
+  });
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t rename it.', 'error'); return; }
+  _chatShown = '';
+  loadChat();
+}
+
+async function deleteChat(id) {
+  const c = _chatSessions.find(x => x.id === id);
+  if (!confirm('Delete "' + (c ? c.title : 'this chat') + '" and all its messages?')) return;
+  const r = await api('/api/chat/sessions/' + encodeURIComponent(id) + '/delete', {method: 'POST'});
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t delete it.', 'error'); return; }
+  if (id === _chatSession) rememberChat('');
+  _chatShown = '';
+  loadChat();
 }
 
 async function sendChat(event) {
@@ -533,13 +618,14 @@ async function sendChat(event) {
   send.disabled = true;
   const r = await api('/api/chat', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({message}),
+    body: JSON.stringify({message, session: _chatSession}),
   });
   if (!r || r.success === false) {
     showToast((r && r.message) || 'Couldn\'t send that. Is the dashboard still running?', 'error');
     send.disabled = false;
     return;
   }
+  rememberChat(r.session);
   input.value = '';
   loadChat();
 }
@@ -556,12 +642,159 @@ async function stopChat() {
   loadChat();
 }
 
-async function clearChat() {
-  if (!confirm('Clear the whole conversation with Harvey?')) return;
-  const r = await api('/api/chat/clear', {method: 'POST'});
-  if (r && r.success === false) showToast(r.message || 'Couldn\'t clear the chat.', 'error');
-  _chatShown = '';
-  loadChat();
+// ── Insights: charts over the lead list ──
+// Plain HTML marks: thin bars (<= 24px), 4px rounded data ends, one blue for
+// single series, a validated light-to-dark blue ramp for the ordered status
+// stages. Every mark has a hover/focus tooltip, every chart a table view.
+
+let _vizTip = null;
+
+function vizTip() {
+  if (_vizTip) return _vizTip;
+  _vizTip = document.createElement('div');
+  _vizTip.className = 'viz-tip';
+  _vizTip.setAttribute('role', 'tooltip');
+  document.body.appendChild(_vizTip);
+  const show = (target, x, y) => {
+    _vizTip.innerHTML = target.getAttribute('data-tip');
+    _vizTip.style.display = 'block';
+    const w = _vizTip.offsetWidth, h = _vizTip.offsetHeight;
+    _vizTip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, x - w / 2)) + 'px';
+    _vizTip.style.top = Math.max(8, y - h - 12) + 'px';
+  };
+  const hide = () => { _vizTip.style.display = 'none'; };
+  document.addEventListener('mousemove', e => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (t) show(t, e.clientX, e.clientY); else hide();
+  });
+  document.addEventListener('focusin', e => {
+    const t = e.target.closest && e.target.closest('[data-tip]');
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    show(t, r.left + r.width / 2, r.top);
+  });
+  document.addEventListener('focusout', hide);
+  document.addEventListener('scroll', hide, true);
+  return _vizTip;
+}
+
+function vizTable(head, rows) {
+  return '<details class="viz-table"><summary>Show numbers</summary><table><thead><tr>' +
+    head.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + r.map((c, i) => '<td' + (i ? ' class="num"' : '') + '>' + c + '</td>').join('') + '</tr>').join('') +
+    '</tbody></table></details>';
+}
+
+const pctOf = (n, total) => total ? Math.round(100 * n / total) : 0;
+
+// Horizontal bars: label, bar, value at the tip.
+function hbars(items, total, onClick) {
+  const max = Math.max(1, ...items.map(i => i.count));
+  return '<div class="hbars">' + items.map(i => {
+    const tip = '<b>' + escHtml(i.label) + '</b><br>' + i.count.toLocaleString() + ' lead' + (i.count === 1 ? '' : 's') +
+      (total ? ' · ' + pctOf(i.count, total) + '%' : '');
+    return '<div class="hbar" tabindex="0" data-tip="' + escHtml(tip) + '"' +
+      (onClick ? ' role="button" onclick="' + onClick(i) + '"' : '') + '>' +
+      '<span class="hbar-label">' + escHtml(i.label) + '</span>' +
+      '<span class="hbar-track"><span class="hbar-fill" style="width:' + Math.max(1, 100 * i.count / max) + '%"></span></span>' +
+      '<span class="hbar-val">' + i.count.toLocaleString() + '</span></div>';
+  }).join('') + '</div>' +
+  vizTable(['', 'Leads'], items.map(i => [escHtml(i.label), i.count.toLocaleString()]));
+}
+
+// Columns from a single baseline; the tallest one carries its value.
+function vcols(items, unit, mark) {
+  const max = Math.max(1, ...items.map(i => i.count));
+  const top = items.reduce((b, i) => (i.count > b.count ? i : b), items[0] || {count: 0});
+  return '<div class="vcols" role="img" aria-label="' + escHtml(unit) + '">' + items.map(i =>
+    '<div class="vcol' + (mark && mark(i) ? ' marked' : '') + '" tabindex="0" data-tip="' +
+      escHtml('<b>' + i.label + '</b><br>' + i.count.toLocaleString() + ' ' + unit) + '">' +
+      '<span class="vcol-val">' + (i === top && i.count ? i.count : '') + '</span>' +
+      '<span class="vcol-bar" style="height:' + (i.count ? Math.max(3, Math.round(140 * i.count / max)) : 0) + 'px"></span>' +
+      '<span class="vcol-label">' + escHtml('short' in i ? i.short : i.label) + '</span></div>'
+  ).join('') + '</div>' +
+  vizTable(['', unit[0].toUpperCase() + unit.slice(1)], items.map(i => [escHtml(i.label), i.count.toLocaleString()]));
+}
+
+async function loadInsights() {
+  vizTip();
+  const [d, t] = await Promise.all([api('/api/insights'), api('/api/trend?days=14&tz=' + -new Date().getTimezoneOffset())]);
+  const kpiEl = document.getElementById('insights-kpis');
+  if (!d) { kpiEl.innerHTML = offlineState(); return; }
+  if (d.error) { kpiEl.innerHTML = emptyState(icon('alert'), 'Couldn\'t load insights', escHtml(d.error)); return; }
+  const k = d.kpis || {};
+  const tile = (label, value, note) =>
+    '<div class="kpi"><div class="kpi-label">' + label + '</div>' +
+    '<div class="kpi-main"><span class="kpi-value' + (value ? '' : ' zero') + '">' + value + '</span></div>' +
+    '<span class="kpi-note">' + note + '</span></div>';
+  kpiEl.className = 'kpis viz-kpis';
+  kpiEl.innerHTML =
+    tile('Leads found', (k.leads || 0).toLocaleString(), (k.with_website || 0).toLocaleString() + ' with a website') +
+    tile('Reachable', (k.with_email || 0).toLocaleString(), 'by email · <b>' + (k.with_phone || 0).toLocaleString() + '</b> by phone') +
+    tile('Starred', (k.starred || 0).toLocaleString(), 'score ' + k.star_at + '+ or starred by you') +
+    tile('Average score', k.avg_score === null || k.avg_score === undefined ? '&ndash;' : k.avg_score,
+         (k.scored || 0).toLocaleString() + ' scored · <b>' + (k.replied || 0) + '</b> replied');
+
+  // Status: one whole split into its ordered stages.
+  const status = (d.status || []).filter(s => s.count);
+  const total = status.reduce((a, s) => a + s.count, 0);
+  const stepOf = key => ({new: 1, phone_only: 2, email_found: 3, queued: 3, contacted: 4, replied: 5, opted_out: 0})[key];
+  document.getElementById('viz-status').innerHTML = total
+    ? '<div class="seg-bar" role="img" aria-label="Leads by status">' + status.map(s =>
+        '<span class="seg r' + stepOf(s.key) + '" tabindex="0" style="flex:' + s.count + '" data-tip="' +
+        escHtml('<b>' + s.label + '</b><br>' + s.count.toLocaleString() + ' · ' + pctOf(s.count, total) + '%') + '"></span>').join('') +
+      '</div><div class="legend-rows">' + status.map(s =>
+        '<div class="legend-row"><span class="legend-key"><i class="r' + stepOf(s.key) + '"></i>' + escHtml(s.label) + '</span>' +
+        '<span class="legend-val">' + s.count.toLocaleString() + '</span><span class="legend-pct">' + pctOf(s.count, total) + '%</span></div>').join('') + '</div>'
+    : '<p class="muted viz-empty">No leads yet.</p>';
+
+  const bands = d.score_bands || [];
+  document.getElementById('viz-scores').innerHTML = bands.some(b => b.count)
+    ? vcols(bands.map(b => ({label: 'Score ' + b.band, short: b.band, count: b.count, band: b.band})), 'leads',
+            i => parseInt(i.band, 10) >= k.star_at) +
+      '<p class="muted viz-note">The darker column is the starred band (' + k.star_at + '+).</p>'
+    : '<p class="muted viz-empty">Nothing scored yet. Ask Harvey to score some leads, or run <code>harvey score</code>.</p>';
+
+  if (t && Array.isArray(t.days)) {
+    const days = t.days.map((day, i) => {
+      const dt = new Date(day + 'T00:00:00');
+      return {label: dt.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'}),
+              short: (t.days.length - 1 - i) % 2 ? '' : dt.toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}),
+              count: Number((t.sent || [])[i]) || 0};
+    });
+    const sentTotal = days.reduce((a, x) => a + x.count, 0);
+    const replies = (t.replies || []).reduce((a, x) => a + (Number(x) || 0), 0);
+    document.getElementById('viz-sent').innerHTML = vcols(days, 'emails sent') +
+      '<p class="muted viz-note"><b>' + sentTotal + '</b> sent · <b>' + replies + '</b> repl' + (replies === 1 ? 'y' : 'ies') + ' in 14 days</p>';
+  }
+
+  const typesTotal = (d.lead_types || []).reduce((a, x) => a + x.count, 0);
+  document.getElementById('viz-types').innerHTML = hbars(d.lead_types || [], typesTotal);
+  document.getElementById('viz-locations').innerHTML = hbars(d.locations || [], 0,
+    i => 'openLeadsAt(' + escHtml(JSON.stringify(i.label)) + ')');
+
+  const top = d.top || [];
+  document.getElementById('viz-top').innerHTML = top.length
+    ? '<table class="nowrap"><thead><tr><th aria-label="Starred"></th><th>Company</th><th>Location</th><th>Phone</th><th>Score</th><th>Status</th></tr></thead><tbody>' +
+      top.map(c => '<tr class="clickable" onclick="openLead(' + escHtml(JSON.stringify(c.name)) + ')">' +
+        '<td class="star-cell">' + (c.starred ? '<span class="star-on" aria-label="Starred">&#9733;</span>' : '') + '</td>' +
+        '<td><span class="cell-main">' + escHtml(c.name) + '</span>' + serviceTags(c) + '</td>' +
+        '<td>' + escHtml(c.location) + '</td><td class="muted">' + escHtml(c.phone) + '</td>' +
+        '<td>' + meterHtml(c.score) + '</td><td>' + statusChip({lead_status: c.status}) + '</td></tr>').join('') +
+      '</tbody></table>'
+    : '<div class="empty"><div class="copy">Scored leads show up here, best first.</div></div>';
+}
+
+function openLeadsAt(location) {
+  goTab('companies');
+  const el = document.getElementById('lf-location');
+  if (el) { el.value = location; leadFilterChanged(); }
+}
+
+function openLead(name) {
+  goTab('companies');
+  const el = document.getElementById('lf-q');
+  if (el) { el.value = name; leadFilterChanged(); }
 }
 
 // ── Today: what needs a human ──

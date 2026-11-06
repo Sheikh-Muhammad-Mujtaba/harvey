@@ -2625,6 +2625,19 @@ async def get_leads(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/insights")
+async def get_insights():
+    """Numbers for the Insights charts."""
+    from harvey import leads
+    try:
+        state = _state()
+        await state.init_db()
+        return await leads.insights(state, _config_or_none())
+    except Exception as e:
+        logger.exception("insights failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/leads/facets")
 async def get_lead_facets():
     from harvey import leads
@@ -2708,11 +2721,20 @@ def _chat():
     return _chat_agent
 
 
+async def _json_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 @app.get("/api/chat")
-async def get_chat():
+async def get_chat(request: Request):
+    """One session's messages (the most recent session when none is named)."""
     try:
         await _state().init_db()
-        return await _chat().snapshot()
+        return await _chat().snapshot(request.query_params.get("session") or "")
     except Exception as e:
         logger.exception("chat history failed")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -2720,18 +2742,16 @@ async def get_chat():
 
 @app.post("/api/chat")
 async def post_chat(request: Request):
-    try:
-        body = await request.json()
-    except ValueError:
-        body = None
-    message = body.get("message") if isinstance(body, dict) else None
+    body = await _json_body(request)
+    message = body.get("message")
     if not isinstance(message, str):
-        return _refuse('expected {"message": "..."}', 400)
+        return _refuse('expected {"message": "...", "session": "<id, optional>"}', 400)
     await _state().init_db()
-    problem = await _chat().start(message)
+    agent = _chat()
+    problem = await agent.start(message, str(body.get("session") or ""))
     if problem:
         return _refuse(problem, 409)
-    return {"success": True}
+    return {"success": True, "session": agent.session_id}
 
 
 @app.post("/api/chat/stop")
@@ -2739,11 +2759,51 @@ async def stop_chat():
     return {"success": _chat().stop()}
 
 
+@app.get("/api/chat/sessions")
+async def list_chat_sessions():
+    await _state().init_db()
+    agent = _chat()
+    return {"sessions": await agent.store.sessions(),
+            "busy_session": agent.session_id if agent.busy else ""}
+
+
+@app.post("/api/chat/sessions")
+async def new_chat_session(request: Request):
+    await _state().init_db()
+    title = str((await _json_body(request)).get("title") or "")
+    sid = await _chat().store.create_session(title)
+    return {"success": True, "session": await _chat().store.session(sid)}
+
+
+@app.post("/api/chat/sessions/{session_id}/rename")
+async def rename_chat_session(session_id: str, request: Request):
+    await _state().init_db()
+    title = (await _json_body(request)).get("title")
+    if not isinstance(title, str) or not title.strip():
+        return _refuse('expected {"title": "..."}', 400)
+    if not await _chat().store.rename(session_id, title):
+        return _refuse("unknown chat", 404)
+    return {"success": True}
+
+
+@app.post("/api/chat/sessions/{session_id}/delete")
+async def delete_chat_session(session_id: str):
+    await _state().init_db()
+    agent = _chat()
+    if agent.busy and agent.session_id == session_id:
+        return _refuse("Harvey is answering in this chat. Stop it first.")
+    if not await agent.store.delete_session(session_id):
+        return _refuse("unknown chat", 404)
+    return {"success": True}
+
+
 @app.post("/api/chat/clear")
-async def clear_chat():
-    if _chat().busy:
+async def clear_chat(request: Request):
+    agent = _chat()
+    sid = str((await _json_body(request)).get("session") or "") or await agent.store.latest()
+    if agent.busy and agent.session_id == sid:
         return _refuse("Wait for Harvey to finish answering, or stop it first.")
-    await _chat().store.clear()
+    await agent.store.clear(sid)
     return {"success": True}
 
 
