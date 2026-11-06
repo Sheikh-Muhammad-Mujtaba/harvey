@@ -678,6 +678,7 @@ class HarveyConfig(BaseModel):
     compliance: ComplianceConfig = ComplianceConfig()
     writer: WriterConfig = WriterConfig()
     signature: SignatureConfig = SignatureConfig()
+    lead_scoring: LeadScoringConfig = LeadScoringConfig()
     # The file it was loaded from, so a running Harvey can re-read the
     # sending mode from that same file (refresh_sending_mode).
     _source_path: str | None = PrivateAttr(default=None)

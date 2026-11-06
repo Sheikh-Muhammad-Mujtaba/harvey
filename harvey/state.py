@@ -521,6 +521,17 @@ MIGRATIONS: list[str] = [
     -- knows about the recipient. Empty until then.
     ALTER TABLE prospects ADD COLUMN timezone TEXT DEFAULT '';
     """,
+    # ── v15: lead curation on companies ──
+    """
+    -- starred: 1 = a lead worth chasing. starred_by: 'you' when the operator
+    -- set or cleared it (scoring then leaves it alone), 'score' when lead
+    -- scoring starred it, '' never touched. lead_score: the latest
+    -- LEAD_SCORE observation's value (0-100), kept here to sort and filter.
+    ALTER TABLE companies ADD COLUMN starred INTEGER DEFAULT 0;
+    ALTER TABLE companies ADD COLUMN starred_by TEXT DEFAULT '';
+    ALTER TABLE companies ADD COLUMN lead_score INTEGER DEFAULT NULL;
+    CREATE INDEX IF NOT EXISTS idx_companies_lead_score ON companies(lead_score);
+    """,
 ]
 
 BRAIN_PROVIDERS = ("claude", "codex")

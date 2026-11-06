@@ -1057,6 +1057,40 @@ def cmd_contacts(args):
     asyncio.run(_run())
 
 
+def cmd_score(args):
+    """Score leads against lead_scoring.criteria with Claude's web search."""
+    from harvey import lead_scoring
+    from harvey.brain import Brain
+    from harvey.config import load_config
+    from harvey.signals import seed_signal_catalog
+    from harvey.state import StateManager
+
+    async def _run():
+        config = load_config()
+        if config.brain.provider != "claude":
+            print("\n  Lead scoring uses Claude's web search; set brain.provider: claude.\n")
+            return
+        if not config.lead_scoring.criteria:
+            print("\n  Nothing to score against: add lead_scoring.criteria to your config.\n")
+            return
+        state = StateManager()
+        await state.init_db()
+        await seed_signal_catalog(state)
+        brain = Brain(state, config.brain)
+        print("\n  Scoring (about a minute per 5 companies)...\n")
+        results = await lead_scoring.run_lead_scoring(
+            state, brain, config, limit=args.limit, service=args.service or None, gated=False,
+            location=args.location)
+        for r in sorted(results, key=lambda r: -r["score"]):
+            star = "*" if r["score"] >= config.lead_scoring.star_at else " "
+            print(f"  {star} {r['score']:3}  {r['name'][:40]:40}  {r['est_monthly_budget'][:24]}")
+        print(f"\n  {len(results)} scored. Sort and filter them on the Companies tab.\n")
+        if lead_scoring.SIGNAL not in await state.confirmed_signal_codes():
+            print("  To score automatically each cycle: harvey signals --confirm LEAD_SCORE\n")
+
+    asyncio.run(_run())
+
+
 def cmd_sending(args):
     """Pause/resume the sending kill switch."""
     from harvey.state import StateManager
@@ -1244,6 +1278,13 @@ def main():
     sub.add_argument("--limit", type=int, default=10, help="How many companies (default 10)")
     sub.add_argument("--company", default="", help="Look up one company by name")
     sub.set_defaults(func=cmd_contacts)
+
+    sub = subparsers.add_parser(
+        "score", help="Score leads against lead_scoring.criteria (Claude web search)")
+    sub.add_argument("--limit", type=int, default=10, help="Companies per service (default 10)")
+    sub.add_argument("--service", default="", help="Only this service tag, e.g. 'Digital marketing'")
+    sub.add_argument("--location", default="", help="Only companies whose location contains this, e.g. Denver")
+    sub.set_defaults(func=cmd_score)
 
     sub = subparsers.add_parser("sending", help="Kill switch: pause/resume sending")
     sub.add_argument("sending_action", nargs="?", default="status",

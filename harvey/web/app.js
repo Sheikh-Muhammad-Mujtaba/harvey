@@ -479,7 +479,13 @@ function chatBubble(m) {
       '</ul></details>'
     : '';
   const body = mine ? '<p>' + escHtml(m.content).replace(/\n/g, '<br>') + '</p>' : chatMarkup(m.content);
-  return '<div class="chat-msg ' + (mine ? 'me' : 'harvey') + '"><div class="chat-bubble">' + body + '</div>' + trail + '</div>';
+  // Only the lead export's own link: the file is built when it's clicked.
+  const downloads = steps.filter(s => s.download && /^\/api\/leads\.(xlsx|csv)(\?|$)/.test(s.download.download_url || ''))
+    .map(s => '<button class="btn btn-secondary btn-sm chat-download" onclick="downloadCsv(' + jsq(s.download.download_url) +
+      ', ' + jsq(s.download.filename || 'leads.xlsx') + ', this)">' + icon('download') + 'Download Excel (' +
+      (s.download.count || 0) + ' lead' + (s.download.count === 1 ? '' : 's') + ')</button>').join('');
+  return '<div class="chat-msg ' + (mine ? 'me' : 'harvey') + '"><div class="chat-bubble">' + body + '</div>' +
+    (downloads ? '<div class="chat-downloads">' + downloads + '</div>' : '') + trail + '</div>';
 }
 
 function renderChat(data) {
@@ -2135,39 +2141,127 @@ async function sendingToggle(action) {
   loadOutbox();
 }
 
+// ── Companies: the lead list, filtered on the server ──
+
+let _leadFacets = null;
+let _leadTimer = null;
+const LEAD_STATUS = {
+  new: ['No contact yet', 'idle'], phone_only: ['Phone only', 'waiting'], email_found: ['Email found', 'active'],
+  queued: ['Email queued', 'active'], contacted: ['Contacted', 'note'], replied: ['Replied', 'good'],
+  opted_out: ['Opted out', 'bad'],
+};
+
+function leadFilters() {
+  const v = id => (document.getElementById(id) || {}).value || '';
+  const f = {q: v('lf-q'), service: v('lf-service'), industry: v('lf-industry'), location: v('lf-location'),
+             min_score: v('lf-min-score'), status: v('lf-status'), has: v('lf-has'), sort: v('lf-sort')};
+  if ((document.getElementById('lf-starred') || {}).checked) f.starred = '1';
+  return Object.fromEntries(Object.entries(f).filter(([, x]) => x));
+}
+
+function leadQuery() {
+  return new URLSearchParams(leadFilters()).toString();
+}
+
+function leadFilterChanged(typing) {
+  clearTimeout(_leadTimer);
+  _leadTimer = setTimeout(loadCompanies, typing ? 350 : 0);
+}
+
+async function loadLeadFacets() {
+  if (_leadFacets) return;
+  const f = await api('/api/leads/facets');
+  if (!f) return;
+  _leadFacets = f;
+  const fill = (id, items) => {
+    const el = document.getElementById(id);
+    if (el) el.insertAdjacentHTML('beforeend', items.join(''));
+  };
+  fill('lf-service', (f.services || []).map(x => '<option value="' + escHtml(x) + '">' + escHtml(x) + '</option>'));
+  fill('lf-industry', (f.industries || []).map(x =>
+    '<option value="' + escHtml(x.value) + '">' + escHtml(x.value.replace(/_/g, ' ')) + ' (' + x.count + ')</option>'));
+  fill('lf-status', (f.statuses || []).map(x => '<option value="' + escHtml(x.value) + '">' + escHtml(x.label) + '</option>'));
+  fill('lf-locations', (f.locations || []).map(x => '<option value="' + escHtml(x.value) + '"></option>'));
+}
+
+function starButton(c, i) {
+  const on = !!c.starred;
+  return '<button class="star-btn' + (on ? ' on' : '') + '" aria-pressed="' + on + '" ' +
+    'title="' + (on ? 'Starred' + (c.starred_by === 'score' ? ' by its score' : '') + ': click to unstar' : 'Star this lead') + '" ' +
+    'onclick="event.stopPropagation(); toggleStar(' + i + ')">' + (on ? '&#9733;' : '&#9734;') + '</button>';
+}
+
+function scoreCell(c) {
+  if (c.lead_score === null || c.lead_score === undefined) return '<span class="muted">&ndash;</span>';
+  return meterHtml(c.lead_score);
+}
+
+function statusChip(c) {
+  const [label, tone] = LEAD_STATUS[c.lead_status] || [c.lead_status || '', 'idle'];
+  return '<span class="badge t-' + tone + '">' + escHtml(label) + '</span>';
+}
+
 async function loadCompanies() {
   companyDrill = false;
   const el = document.getElementById('companies-list');
-  const data = await api('/api/companies');
+  await loadLeadFacets();
+  const data = await api('/api/leads?' + leadQuery());
   if (!data) { el.innerHTML = offlineState(); return; }
-  _companies = data;
-  if (!data.length) {
-    el.innerHTML = emptyState(icon('companies'), 'No companies yet',
-      'Confirm your <b>Signals</b>, then find businesses on the <b>Discover</b> tab. ' +
-      'OpenStreetMap is free and needs no account.');
+  if (data.error) { el.innerHTML = emptyState(icon('alert'), 'Couldn\'t load leads', escHtml(data.error)); return; }
+  _companies = data.rows || [];
+  if (!_companies.length) {
+    el.innerHTML = '<div class="table-card">' + (Object.keys(leadFilters()).filter(k => k !== 'sort').length
+      ? emptyState(icon('discover'), 'No leads match', 'Loosen a filter to see more.')
+      : emptyState(icon('companies'), 'No companies yet',
+          'Confirm your <b>Signals</b>, then find businesses on the <b>Discover</b> tab. OpenStreetMap is free and needs no account.')) +
+      '</div>';
     return;
   }
-  let html = '<div class="table-card"><table class="nowrap"><thead><tr><th>Company</th><th>Industry</th>' +
-    '<th>Location</th><th>Phone</th><th class="num">Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
-  data.forEach((c, i) => {
+  let html = '<div class="table-card"><table class="nowrap"><thead><tr><th aria-label="Starred"></th><th>Company</th>' +
+    '<th>Business type</th><th>Location</th><th>Phone</th><th>Score</th><th>Status</th><th class="num">Contacts</th></tr></thead><tbody>';
+  _companies.forEach((c, i) => {
     const website = c.website || (c.domain ? 'https://' + c.domain : '');
     const domain = safeHref(website)
       ? '<a href="' + safeHref(website) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">' +
         escHtml(c.domain || website.replace(/^https?:\/\//i, '')) + '</a>'
-      : escHtml(c.domain);
+      : '';
     html += '<tr class="clickable" onclick="showCompanyContacts(' + i + ')">' +
-      '<td><div class="cell-stack"><span class="cell-main">' + escHtml(c.name) + '</span>' +
+      '<td>' + starButton(c, i) + '</td>' +
+      '<td><div class="cell-stack"><span class="cell-main">' + escHtml(c.name) + serviceTags(c) + '</span>' +
         '<span class="cell-sub">' + domain + '</span></div></td>' +
-      '<td>' + (c.industry ? '<span class="tag">' + escHtml(c.industry) + '</span>' : '') + '</td>' +
+      '<td>' + (c.industry ? '<span class="tag">' + escHtml(c.industry.replace(/_/g, ' ')) + '</span>' : '') + '</td>' +
       '<td>' + escHtml(c.location) + '</td>' +
       '<td class="muted">' + escHtml(c.phone) + '</td>' +
-      '<td class="num">' + (c.contact_count || 0) + '</td>' +
-      '<td class="muted">' + sourceLabel(c.source) + '</td>' +
-      '<td class="muted">' + relTime(c.created_at) + '</td></tr>';
+      '<td>' + scoreCell(c) + '</td>' +
+      '<td>' + statusChip(c) + '</td>' +
+      '<td class="num">' + (c.contact_count || 0) + '</td></tr>';
   });
+  const shown = _companies.length, total = data.total || shown;
   el.innerHTML = html + '</tbody></table></div>' +
-    '<div class="table-foot">' + data.length + ' compan' + (data.length === 1 ? 'y' : 'ies') +
-    ', most recently updated first</div>';
+    '<div class="table-foot">' + (shown < total ? 'Showing ' + shown + ' of ' + total + ' leads; Export gets them all.'
+      : total + ' lead' + (total === 1 ? '' : 's')) + '</div>';
+}
+
+async function toggleStar(i) {
+  const c = _companies[i];
+  if (!c) return;
+  const r = await api('/api/companies/' + encodeURIComponent(c.id) + '/star', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({starred: !c.starred}),
+  });
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t change the star.', 'error'); return; }
+  c.starred = r.starred ? 1 : 0;
+  c.starred_by = 'you';
+  if (companyDrill) showCompanyContacts(i); else loadCompanies();
+}
+
+function exportLeads(btn) {
+  const q = leadQuery();
+  downloadCsv('/api/leads.xlsx' + (q ? '?' + q : ''), 'leads.xlsx', btn);
+}
+
+// Which of your services a lead is for (icp.service_tags), as chips.
+function serviceTags(row) {
+  return (row.service_tags || []).map(t => ' <span class="tag service">' + escHtml(t) + '</span>').join('');
 }
 
 // What a web search found for a company (contact_lookup), as one card.
@@ -2175,7 +2269,9 @@ async function loadCompanies() {
 // is shown as found.
 function contactCardHtml(company) {
   let card = null;
-  try { card = company.contact_card ? JSON.parse(company.contact_card) : null; } catch { card = null; }
+  try {
+    card = typeof company.contact_card === 'string' ? JSON.parse(company.contact_card) : (company.contact_card || null);
+  } catch { card = null; }
   const sources = (card && card.sources) || {};
   const link = (url, text) => safeHref(url)
     ? '<a href="' + safeHref(url) + '" target="_blank" rel="noopener noreferrer">' + escHtml(text || url) + '</a>'
@@ -2211,6 +2307,44 @@ function contactCardHtml(company) {
     (foot ? '<p class="muted contact-card-foot">' + foot + '</p>' : '') + '</div>';
 }
 
+function scoreCardHtml(company) {
+  const d = company.score_detail;
+  if (!d) return '';
+  const part = (label, v) => '<dt>' + label + '</dt><dd>' + escHtml(v === undefined || v === null ? '–' : v) + ' / 10</dd>';
+  return '<div class="card"><div class="card-title">Lead score ' + meterHtml(company.lead_score) +
+    (d.service ? ' <span class="tag service">' + escHtml(d.service) + '</span>' : '') + '</div>' +
+    '<dl class="contact-card">' + part('Budget', d.budget) + part('Premium', d.premium) + part('Closing', d.closing) +
+    (d.est_monthly_budget ? '<dt>Est. budget</dt><dd>' + escHtml(d.est_monthly_budget) + ' a month</dd>' : '') +
+    (d.why ? '<dt>Why</dt><dd>' + escHtml(d.why) + '</dd>' : '') +
+    (d.risks ? '<dt>Risks</dt><dd>' + escHtml(d.risks) + '</dd>' : '') + '</dl>' +
+    '<p class="muted contact-card-foot">Judged by Claude from a web search against your criteria (lead_scoring in the config).</p></div>';
+}
+
+function notesHtml(company, index) {
+  const lines = String(company.notes || '').split('\n').filter(Boolean);
+  return '<div class="card"><div class="card-title">Notes</div>' +
+    (lines.length ? '<ul class="lead-notes">' + lines.map(l => '<li>' + escHtml(l) + '</li>').join('') + '</ul>'
+      : '<p class="muted" style="font-size:13px">No notes yet.</p>') +
+    '<form class="lead-note-form" onsubmit="saveNote(event, ' + index + ')">' +
+    '<input class="form-input" id="lead-note-input" maxlength="1000" placeholder="Add a note: who you spoke to, what they need, next step" aria-label="New note">' +
+    '<button class="btn btn-secondary btn-sm" type="submit">Add note</button></form></div>';
+}
+
+async function saveNote(event, index) {
+  event.preventDefault();
+  const company = _companies[index];
+  const input = document.getElementById('lead-note-input');
+  const text = (input.value || '').trim();
+  if (!company || !text) return;
+  const r = await api('/api/companies/' + encodeURIComponent(company.id) + '/note', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}),
+  });
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t save the note.', 'error'); return; }
+  const stamp = new Date().toISOString().slice(0, 10);
+  company.notes = (company.notes ? company.notes + '\n' : '') + '[' + stamp + ' you] ' + text;
+  showCompanyContacts(index);
+}
+
 async function showCompanyContacts(index) {
   const company = _companies[index];
   if (!company) return;
@@ -2218,11 +2352,14 @@ async function showCompanyContacts(index) {
   const el = document.getElementById('companies-list');
   const data = await api('/api/companies/' + encodeURIComponent(company.id) + '/contacts');
   let html = '<button class="btn btn-ghost btn-sm" onclick="loadCompanies()" style="margin-bottom:12px">' +
-    '&larr; All companies</button>' + contactCardHtml(company) +
-    '<div class="card flush"><div class="card-head"><h3>' + escHtml(company.name) + '</h3>' +
+    '&larr; All companies</button>' +
+    '<div class="lead-head">' + starButton(company, index) + '<h3>' + escHtml(company.name) + '</h3>' + serviceTags(company) +
+    (company.lead_status ? ' ' + statusChip(company) : '') + '</div>' +
+    '<div class="lead-cards">' + contactCardHtml(company) + scoreCardHtml(company) + notesHtml(company, index) + '</div>' +
+    '<div class="card flush"><div class="card-head"><h3>Contacts</h3>' +
     '<span class="meta">' + escHtml([company.industry, company.location].filter(Boolean).join(' · ')) + '</span></div>';
   if (!data || !data.length) {
-    html += '<div class="empty"><div class="copy">No contacts found at this company yet.</div></div></div>';
+    html += '<div class="empty"><div class="copy">No contacts found at this company yet. Ask Harvey to research it.</div></div></div>';
   } else {
     html += '<table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Status</th><th>Source</th></tr></thead><tbody>';
     for (const p of data) {
@@ -2312,7 +2449,8 @@ function renderContacts() {
   const filtersEl = document.getElementById('contact-filters');
   if (!rowsEl) return;
   const q = _contactQuery.trim().toLowerCase();
-  const found = p => !q || [p.first_name, p.last_name, p.company, p.email, p.title].join(' ').toLowerCase().includes(q);
+  const found = p => !q || [p.first_name, p.last_name, p.company, p.email, p.title,
+    ...(p.service_tags || [])].join(' ').toLowerCase().includes(q);
   filtersEl.innerHTML = CONTACT_FILTERS.map(f =>
     '<button class="' + (f[0] === _contactFilter ? 'on' : '') + '" aria-pressed="' + (f[0] === _contactFilter) + '" onclick="setContactFilter(\'' + f[0] + '\')">' +
       f[1] + ' <span class="n">' + _prospects.filter(p => contactMatches(p, f[0]) && found(p)).length + '</span></button>'
@@ -2330,7 +2468,8 @@ function renderContacts() {
     html += '<tr><td><div class="cell-row"><span class="avatar">' + initials(p.first_name, p.last_name) + '</span>' +
         '<div class="cell-stack"><span class="cell-main">' + escHtml(p.first_name) + ' ' + escHtml(p.last_name) + '</span>' +
         '<span class="cell-sub">' + escHtml(p.title) + '</span></div></div></td>' +
-      '<td>' + escHtml(p.company) + '</td>' +
+      '<td><div class="cell-stack"><span>' + escHtml(p.company) + '</span>' +
+        (serviceTags(p) ? '<span class="cell-sub">' + serviceTags(p) + '</span>' : '') + '</div></td>' +
       '<td><div class="cell-stack"><span>' + escHtml(p.email) + '</span>' +
         '<span class="cell-sub">' + [emailTag(p).trim(), p.phone ? escHtml(p.phone) +
           (p.phone_verified ? ' <span class="verified" title="Phone verified">&#10003;</span>' : '') : '']

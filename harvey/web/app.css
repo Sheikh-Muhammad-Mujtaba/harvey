@@ -1087,3 +1087,33 @@ a.btn, a.btn:hover { text-decoration: none; }
 .contact-card dt { color: var(--text-3); }
 .contact-card dd { margin: 0; overflow-wrap: anywhere; }
 .contact-card-foot { font-size: var(--fs-caption); margin-top: var(--sp-3); }
+
+/* Which service a lead is for (icp.service_tags) */
+.tag.service { background: var(--note-bg); color: var(--note); border-color: var(--note-line); }
+
+/* ── Companies: lead filters, stars, notes ── */
+.lead-filters {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-4);
+}
+.lead-filters .form-input { width: auto; min-width: 150px; flex: 1 1 150px; max-width: 240px; }
+.lead-filters #lf-q { flex: 2 1 220px; max-width: 320px; }
+.lf-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-ui); color: var(--text-2); }
+.star-btn {
+  background: none; border: 0; padding: 2px 4px; font-size: 18px; line-height: 1; cursor: pointer;
+  color: var(--text-3); border-radius: var(--r-xs);
+}
+.star-btn.on { color: #D99A00; }
+.star-btn:hover { background: var(--surface-2); }
+.star-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lead-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.lead-head h3 { font-size: var(--fs-h3); font-weight: 600; }
+.lead-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--sp-4); }
+.lead-cards .card { margin-bottom: var(--sp-4); }
+.lead-notes { margin: 0 0 var(--sp-3) 16px; font-size: var(--fs-ui); }
+.lead-notes li + li { margin-top: 4px; }
+.lead-note-form { display: flex; gap: var(--sp-2); }
+.lead-note-form .form-input { flex: 1; min-width: 0; }
+.chat-downloads { margin-top: 6px; display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .lead-filters .form-input { max-width: none; flex-basis: 100%; }
+}

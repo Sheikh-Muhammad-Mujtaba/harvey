@@ -266,7 +266,34 @@
 
 <!-- Companies -->
 <div id="companies" class="section">
-  <div class="section-head"><div><h2>Companies</h2><p>Organizations Harvey has researched. Click a row to see its contacts.</p></div></div>
+  <div class="section-head">
+    <div><h2>Companies</h2><p>Every lead Harvey has found, best score first. Filter, star the ones worth
+      chasing, and export exactly what you filtered. Click a row for its contact details, score,
+      notes and contacts.</p></div>
+    <div class="page-actions">
+      <button class="btn btn-secondary btn-sm" id="leads-export" onclick="exportLeads(this)"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export filtered</button>
+    </div>
+  </div>
+  <div class="lead-filters" id="lead-filters">
+    <input class="form-input" id="lf-q" type="search" placeholder="Search name or website" aria-label="Search" oninput="leadFilterChanged(true)">
+    <select class="form-input" id="lf-service" aria-label="Lead type" onchange="leadFilterChanged()"><option value="">All lead types</option></select>
+    <select class="form-input" id="lf-industry" aria-label="Business type" onchange="leadFilterChanged()"><option value="">All business types</option></select>
+    <input class="form-input" id="lf-location" list="lf-locations" placeholder="Location" aria-label="Location" oninput="leadFilterChanged(true)">
+    <datalist id="lf-locations"></datalist>
+    <select class="form-input" id="lf-min-score" aria-label="Minimum score" onchange="leadFilterChanged()">
+      <option value="">Any score</option><option value="40">40+</option><option value="50">50+</option>
+      <option value="60">60+</option><option value="70">70+</option><option value="80">80+</option>
+    </select>
+    <select class="form-input" id="lf-status" aria-label="Status" onchange="leadFilterChanged()"><option value="">Any status</option></select>
+    <select class="form-input" id="lf-has" aria-label="Contact details" onchange="leadFilterChanged()">
+      <option value="">Any contact details</option><option value="email">Has email</option>
+      <option value="phone">Has phone</option><option value="website">Has website</option>
+    </select>
+    <select class="form-input" id="lf-sort" aria-label="Sort" onchange="leadFilterChanged()">
+      <option value="score">Best score first</option><option value="recent">Recently updated</option><option value="name">Name A&ndash;Z</option>
+    </select>
+    <label class="lf-check"><input type="checkbox" id="lf-starred" onchange="leadFilterChanged()"> Starred only</label>
+  </div>
   <div id="companies-list"></div>
 </div>
 

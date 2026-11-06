@@ -2609,6 +2609,92 @@ async def get_runs_api():
         return {"error": str(e)}
 
 
+# ── Leads: the filtered Companies list, its export, stars and notes ──
+
+@app.get("/api/leads")
+async def get_leads(request: Request):
+    from harvey import leads
+    try:
+        state = _state()
+        await state.init_db()
+        config = _config_or_none()
+        result = await leads.list_leads(state, leads.filters_from(request.query_params), config)
+        return result
+    except Exception as e:
+        logger.exception("leads failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/leads/facets")
+async def get_lead_facets():
+    from harvey import leads
+    state = _state()
+    await state.init_db()
+    return await leads.facets(state, _config_or_none())
+
+
+@app.get("/api/leads.csv")
+async def export_leads_csv(request: Request):
+    """Every lead matching the filters, as CSV built in memory."""
+    from harvey import leads
+    state = _state()
+    await state.init_db()
+    result = await leads.list_leads(state, leads.filters_from(request.query_params),
+                                    _config_or_none(), limit=None)
+    return Response(leads.to_csv(result["rows"]), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="leads.csv"'})
+
+
+@app.get("/api/leads.xlsx")
+async def export_leads_xlsx(request: Request):
+    """Every lead matching the filters plus their contacts, as an Excel
+    workbook built in memory (Leads, Contacts and About sheets)."""
+    from harvey import leads
+    state = _state()
+    await state.init_db()
+    filters = leads.filters_from(request.query_params)
+    result = await leads.list_leads(state, filters, _config_or_none(), limit=None)
+    contacts = await leads.contacts_for(state, [r["id"] for r in result["rows"]])
+    data = leads.to_xlsx(result["rows"], contacts, filters,
+                         datetime.now().strftime("%Y-%m-%d %H:%M"))
+    return Response(data, media_type=("application/vnd.openxmlformats-officedocument."
+                                      "spreadsheetml.sheet"),
+                    headers={"Content-Disposition": 'attachment; filename="leads.xlsx"'})
+
+
+@app.post("/api/companies/{company_id}/star")
+async def star_company(company_id: str, request: Request):
+    from harvey.lead_scoring import set_star
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or not isinstance(body.get("starred"), bool):
+        return _refuse('expected {"starred": true|false}', 400)
+    state = _state()
+    await state.init_db()
+    if not await set_star(state, company_id, body["starred"]):
+        return _refuse("unknown company", 404)
+    return {"success": True, "starred": body["starred"]}
+
+
+@app.post("/api/companies/{company_id}/note")
+async def note_company(company_id: str, request: Request):
+    from harvey.lead_scoring import add_note
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    text = body.get("text") if isinstance(body, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        return _refuse('expected {"text": "..."}', 400)
+    state = _state()
+    await state.init_db()
+    if not await add_note(state, company_id, text):
+        return _refuse("unknown company", 404)
+    return {"success": True}
+
+
 # ── Ask Harvey: the chat tab (see harvey/chat.py) ──
 
 _chat_agent = None

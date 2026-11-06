@@ -19,6 +19,7 @@ from harvey.pidfile import (
     LOCK_FILE, hold_loop_lock, read_pid, release_loop_lock, remove_pid_file, write_pid_file,
 )
 from harvey.contact_lookup import run_contact_lookup
+from harvey.lead_scoring import run_lead_scoring
 from harvey.pipeline import run_profile_stage
 from harvey.state import StateManager
 
@@ -426,6 +427,12 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
             # emails: it spends Claude calls, so replies and writing come first.
             if action in ("prospect", "idle") and config.usage.contact_lookups_per_cycle:
                 tasks.append(("contacts", run_contact_lookup(state, brain, config, env)))
+
+            # Lead scores for services with criteria (lead_scoring), while the
+            # LEAD_SCORE signal is confirmed: a few companies a cycle.
+            if (action in ("prospect", "idle") and config.lead_scoring.per_cycle
+                    and config.lead_scoring.criteria):
+                tasks.append(("score", run_lead_scoring(state, brain, config)))
 
             outcomes = await _run_agents(tasks)
 

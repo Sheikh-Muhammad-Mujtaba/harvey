@@ -300,6 +300,22 @@ SIGNAL_CATALOG: list[dict] = [
 
     # ── People: who decides ──
     {
+        "code": "LEAD_SCORE",
+        "label": "Lead score (web search)",
+        "description": (
+            "A 0-100 score for how good a client the business would be, judged against "
+            "what you wrote in lead_scoring.criteria for its service (budget, kind of "
+            "brand, how likely to close), with the reasons. Claude looks the business up "
+            "on the web to judge. High scores star the lead. Sort and filter by it on "
+            "the Companies tab."
+        ),
+        "category": "people",
+        "value_type": "num",
+        "collector": "lead_scoring",
+        "cost_note": "one Claude call with web search per few companies (your plan's quota)",
+        "confidence_floor": 0.0,
+    },
+    {
         "code": "CONTACT_DETAILS",
         "label": "Contact details (web search)",
         "description": (
