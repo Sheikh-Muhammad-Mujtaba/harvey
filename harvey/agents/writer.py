@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from harvey import service_tags
+from harvey import pitch_brief, service_tags
 from harvey.brain import Brain
 from harvey.config import HarveyConfig
 from harvey.humanize import humanize, humanizer_enabled
@@ -373,6 +373,9 @@ class Writer:
                 )
         if prospect.personalization_notes:
             facts.append(f"- Research notes: {prospect.personalization_notes}")
+        angle = await pitch_brief.angle_for(self.state, prospect.company_id)
+        if angle:
+            facts.append(f"- Angle from this company's pitch brief: {angle}")
         startup = await self._startup(prospect.company_id)
         if startup is not None:
             facts.extend(startup)

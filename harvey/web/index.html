@@ -7,6 +7,7 @@
 <title>Harvey — Command Deck</title>
 <!-- First, so the token leaves the address bar before anything else runs. -->
 <script src="/static/auth.js"></script>
+<script src="/static/theme.js"></script>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -37,6 +38,19 @@
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
     <symbol id="i-insights" viewBox="0 0 24 24"><path d="M4 20V11M10 20V5M16 20v-6M22 20H2"/></symbol>
+    <symbol id="i-deals" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><path d="m9 11 3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></symbol>
+    <symbol id="i-brief" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-theme-auto" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-theme-light" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-theme-dark" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.5-.8 1.5-1.5 0-.9-.6-1.2-.6-2 0-.8.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-5-4-9-9-9z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></symbol>
+    <symbol id="i-trend-up" viewBox="0 0 24 24"><path d="m4 15 5-5 4 4 7-7"/><path d="M15 7h5v5"/></symbol>
+    <symbol id="i-trend-down" viewBox="0 0 24 24"><path d="m4 9 5 5 4-4 7 7"/><path d="M15 17h5v-5"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h11"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
@@ -81,20 +95,26 @@
 
 <aside class="sidebar">
   <div class="brand">
-    <h1>Harvey</h1>
-    <div class="tagline">Always Be Closing</div>
+    <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-bolt"/></svg></span>
+    <div class="brand-text"><h1>Harvey</h1><div class="tagline">Always Be Closing</div></div>
+    <button class="side-collapse" id="side-collapse" type="button" onclick="toggleSidebar()"
+            aria-label="Collapse the sidebar" title="Collapse the sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+    <button class="menu-btn" id="menu-btn" type="button" onclick="toggleMenu()" aria-label="Open the menu"
+            aria-expanded="false" aria-controls="side-nav"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
   </div>
 
-  <nav aria-label="Sections">
+  <nav aria-label="Sections" id="side-nav">
     <div class="nav-group">
       <div class="nav-label">Work</div>
       <button class="active" onclick="showTab('today', this)"><svg class="icon" aria-hidden="true"><use href="#i-today"/></svg><span class="label">Today</span><span class="nav-count" id="nav-today"></span></button>
       <button onclick="showTab('chat', this)"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg><span class="label">Ask Harvey</span></button>
       <button onclick="showTab('outbox', this)"><svg class="icon" aria-hidden="true"><use href="#i-outbox"/></svg><span class="label">Outbox</span><span class="nav-count" id="nav-outbox"></span></button>
       <button onclick="showTab('conversations', this)"><svg class="icon" aria-hidden="true"><use href="#i-conversations"/></svg><span class="label">Conversations</span><span class="nav-count" id="nav-conversations"></span></button>
+      <button onclick="showTab('tasks', this)"><svg class="icon" aria-hidden="true"><use href="#i-tasks"/></svg><span class="label">Tasks</span><span class="nav-count" id="nav-tasks"></span></button>
     </div>
     <div class="nav-group">
       <div class="nav-label">Pipeline</div>
+      <button onclick="showTab('deals', this)"><svg class="icon" aria-hidden="true"><use href="#i-deals"/></svg><span class="label">Deals</span></button>
       <button onclick="showTab('insights', this)"><svg class="icon" aria-hidden="true"><use href="#i-insights"/></svg><span class="label">Insights</span></button>
       <button onclick="showTab('signals', this)"><svg class="icon" aria-hidden="true"><use href="#i-signals"/></svg><span class="label">Signals</span><span class="nav-count" id="nav-signals"></span></button>
       <button onclick="showTab('discover', this)"><svg class="icon" aria-hidden="true"><use href="#i-discover"/></svg><span class="label">Discover</span></button>
@@ -118,14 +138,16 @@
       <span id="header-status-text">Checking…</span>
     </div>
     <div class="foot-actions">
-      <button class="icon-btn" id="theme-btn" onclick="cycleTheme()"
-              title="Appearance: follows your system until you pick one">auto</button>
-      <button class="icon-btn" onclick="signOut()" title="Sign out of this dashboard">sign out</button>
-      <button class="refresh-btn" onclick="loadCurrentTab()" title="Refresh this page">
-        <svg class="icon" style="width:13px;height:13px"><use href="#i-refresh"/></svg>Refresh</button>
+      <button class="icon-btn theme-btn" id="theme-btn" onclick="cycleTheme()"
+              title="Theme: follows your system" aria-label="Theme: follows your system"><svg class="icon" aria-hidden="true"><use href="#i-theme-auto"/></svg></button>
+      <button class="icon-btn" onclick="signOut()" title="Sign out of this dashboard" aria-label="Sign out">
+        <svg class="icon foot-icon" aria-hidden="true"><use href="#i-logout"/></svg><span class="foot-label">Sign out</span></button>
+      <button class="refresh-btn" onclick="loadCurrentTab()" title="Refresh this page" aria-label="Refresh">
+        <svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-refresh"/></svg><span class="foot-label">Refresh</span></button>
     </div>
   </div>
 </aside>
+<div class="nav-scrim" onclick="toggleMenu(false)" aria-hidden="true"></div>
 
 <main class="content">
 <div class="content-inner">
@@ -198,22 +220,74 @@
 </div>
 
 <!-- Insights: charts over the lead list -->
+<div id="deals" class="section">
+  <div class="section-head">
+    <div>
+      <h2>Deals</h2>
+      <p>Every deal from qualified to won. Harvey moves cards itself as it emails and people reply;
+         drag a card (or use its menu) for what happens off email: a call booked, a proposal sent,
+         a deal signed. Click a card to open the company.</p>
+    </div>
+  </div>
+  <div class="lead-filters deal-filters">
+    <input class="form-input" id="df-q" type="search" placeholder="Search deals" aria-label="Search deals" oninput="dealFilterChanged(true)">
+    <select class="form-input" id="df-service" aria-label="Lead type" onchange="dealFilterChanged()"><option value="">All lead types</option></select>
+    <span class="filter-count" id="deal-summary" aria-live="polite"></span>
+  </div>
+  <div id="deal-board" class="deal-board"></div>
+</div>
+
+<div id="tasks" class="section">
+  <div class="section-head">
+    <div>
+      <h2>Tasks</h2>
+      <p>Your follow-ups, overdue first. When someone writes back, Harvey adds "reply to them" here,
+         due today: an answer within the hour turns into a deal far more often than one tomorrow.</p>
+    </div>
+  </div>
+  <form class="card task-add" onsubmit="addTask(event)">
+    <input class="form-input" id="task-title" maxlength="200" placeholder="Add a follow-up, e.g. Call the owner about the audit" aria-label="New task" required>
+    <select class="form-input" id="task-due" aria-label="Due">
+      <option value="today">Today</option><option value="tomorrow">Tomorrow</option>
+      <option value="next week">Next week</option><option value="">No date</option>
+    </select>
+    <button class="btn btn-primary btn-sm" type="submit"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add</button>
+  </form>
+  <label class="lf-check task-done-toggle"><input type="checkbox" id="tasks-show-done" onchange="loadTasks()"> Show done</label>
+  <div id="tasks-list"></div>
+</div>
+
 <div id="insights" class="section">
   <div class="section-head">
     <div>
       <h2>Insights</h2>
-      <p>Where your leads stand: how many Harvey can reach, how they score, what they're for and
-         where they are. Hover a bar for its numbers; click a lead to open it.</p>
+      <p>How the pipeline is doing: what came in, what went out, who answered and what it's worth.
+         Hover a chart for its numbers; click a bar to open those leads.</p>
+    </div>
+    <div class="page-actions">
+      <div class="seg-control" role="radiogroup" aria-label="Period" id="insights-period">
+        <button type="button" role="radio" data-period="7" onclick="setInsightsPeriod(7)">7 days</button>
+        <button type="button" role="radio" data-period="30" onclick="setInsightsPeriod(30)">30 days</button>
+        <button type="button" role="radio" data-period="90" onclick="setInsightsPeriod(90)">90 days</button>
+      </div>
     </div>
   </div>
-  <div class="viz-kpis" id="insights-kpis"></div>
-  <div class="viz-grid">
-    <div class="card viz-card viz-wide"><div class="card-title">Leads by status</div><div id="viz-status"></div></div>
+  <div class="ins-kpis" id="insights-kpis"></div>
+  <div class="viz-grid ins-grid">
+    <div class="card viz-card ins-span-2">
+      <div class="card-head-row"><div class="card-title">Outreach activity</div>
+        <div class="viz-legend" id="viz-activity-legend"></div></div>
+      <div id="viz-activity" class="viz-activity"></div>
+    </div>
+    <div class="card viz-card"><div class="card-title">Conversion funnel</div><div id="viz-funnel"></div></div>
+    <div class="card viz-card"><div class="card-head-row"><div class="card-title">Pipeline by stage</div>
+      <span class="meta" id="viz-deals-total"></span></div><div id="viz-deals"></div></div>
+    <div class="card viz-card"><div class="card-title">How reachable leads are</div><div id="viz-tiers"></div></div>
     <div class="card viz-card"><div class="card-title">Lead scores</div><div id="viz-scores"></div></div>
-    <div class="card viz-card"><div class="card-title">Emails sent, last 14 days</div><div id="viz-sent"></div></div>
+    <div class="card viz-card ins-span-3"><div class="card-title">Leads by status</div><div id="viz-status"></div></div>
     <div class="card viz-card"><div class="card-title">Lead types</div><div id="viz-types"></div></div>
-    <div class="card viz-card"><div class="card-title">Top locations</div><div id="viz-locations"></div></div>
-    <div class="card viz-card viz-wide flush"><div class="card-head"><h3>Top leads</h3>
+    <div class="card viz-card ins-span-2"><div class="card-title">Top locations</div><div id="viz-locations"></div></div>
+    <div class="card viz-card ins-span-3 flush"><div class="card-head"><h3>Top leads</h3>
       <span class="meta"><a href="#" onclick="goTab('companies');return false">All companies</a></span></div>
       <div id="viz-top"></div></div>
   </div>
@@ -319,6 +393,7 @@
       <option value="60">60+</option><option value="70">70+</option><option value="80">80+</option>
     </select>
     <select class="form-input" id="lf-status" aria-label="Status" onchange="leadFilterChanged()"><option value="">Any status</option></select>
+    <select class="form-input" id="lf-tier" aria-label="How reachable" onchange="leadFilterChanged()"><option value="">Any reach</option></select>
     <select class="form-input" id="lf-has" aria-label="Contact details" onchange="leadFilterChanged()">
       <option value="">Any contact details</option><option value="email">Has email</option>
       <option value="phone">Has phone</option><option value="website">Has website</option>
@@ -327,6 +402,7 @@
       <option value="score">Best score first</option><option value="recent">Recently updated</option><option value="name">Name A&ndash;Z</option>
     </select>
     <label class="lf-check"><input type="checkbox" id="lf-starred" onchange="leadFilterChanged()"> Starred only</label>
+    <span class="filter-count" id="lead-summary" aria-live="polite"></span>
   </div>
   <div class="job-status" id="job-scoring" role="status" aria-live="polite" hidden></div>
   <div class="job-status" id="job-people" role="status" aria-live="polite" hidden></div>
@@ -390,6 +466,40 @@
 <!-- Settings -->
 <div id="settings" class="section">
   <div class="section-head"><div><h2>Settings</h2><p>Credentials are stored locally in <code>.env</code> and never sent anywhere except the services themselves.</p></div></div>
+
+  <div class="subhead">Appearance <span class="hint">Saved in this browser only</span></div>
+  <div class="card appearance">
+    <div class="appearance-row">
+      <div><h3>Theme</h3><p class="desc">System follows your computer or phone and switches with it.</p></div>
+      <div class="theme-choices" role="radiogroup" aria-label="Theme">
+        <button type="button" class="theme-choice" role="radio" data-theme-choice="auto" onclick="setTheme('auto')">
+          <span class="theme-preview split"><span class="tp-side"></span><span class="tp-main"><i></i><i></i><i></i></span></span>
+          <span class="theme-name"><svg class="icon" aria-hidden="true"><use href="#i-theme-auto"/></svg>System</span></button>
+        <button type="button" class="theme-choice" role="radio" data-theme-choice="light" onclick="setTheme('light')">
+          <span class="theme-preview light"><span class="tp-side"></span><span class="tp-main"><i></i><i></i><i></i></span></span>
+          <span class="theme-name"><svg class="icon" aria-hidden="true"><use href="#i-theme-light"/></svg>Light</span></button>
+        <button type="button" class="theme-choice" role="radio" data-theme-choice="dark" onclick="setTheme('dark')">
+          <span class="theme-preview dark"><span class="tp-side"></span><span class="tp-main"><i></i><i></i><i></i></span></span>
+          <span class="theme-name"><svg class="icon" aria-hidden="true"><use href="#i-theme-dark"/></svg>Dark</span></button>
+      </div>
+    </div>
+    <div class="appearance-row">
+      <div><h3>Accent colour</h3><p class="desc">Buttons, links and the current page. Status colours (green, amber, red) never change.</p></div>
+      <div class="accent-choices" role="radiogroup" aria-label="Accent colour">
+        <button type="button" class="accent-choice" role="radio" data-accent-choice="cobalt" onclick="setAccent('cobalt')"><span class="swatch a-cobalt"></span>Cobalt</button>
+        <button type="button" class="accent-choice" role="radio" data-accent-choice="indigo" onclick="setAccent('indigo')"><span class="swatch a-indigo"></span>Indigo</button>
+        <button type="button" class="accent-choice" role="radio" data-accent-choice="fuchsia" onclick="setAccent('fuchsia')"><span class="swatch a-fuchsia"></span>Fuchsia</button>
+        <button type="button" class="accent-choice" role="radio" data-accent-choice="graphite" onclick="setAccent('graphite')"><span class="swatch a-graphite"></span>Graphite</button>
+      </div>
+    </div>
+    <div class="appearance-row">
+      <div><h3>Density</h3><p class="desc">Compact fits more rows on screen.</p></div>
+      <div class="seg-control" role="radiogroup" aria-label="Density">
+        <button type="button" role="radio" data-density-choice="comfortable" onclick="setDensity('comfortable')">Comfortable</button>
+        <button type="button" role="radio" data-density-choice="compact" onclick="setDensity('compact')">Compact</button>
+      </div>
+    </div>
+  </div>
 
   <div class="subhead">Sending</div>
   <div id="sending-mode-card"></div>

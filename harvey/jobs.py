@@ -203,7 +203,8 @@ class PeopleJob(BackgroundJob):
             report["unconfirmed"] += sum(1 for p in card.people if not p["confirmed"])
             report["results"].append({
                 "id": card.company_id, "name": card.name,
-                "people": [{k: p[k] for k in ("name", "title", "confirmed", "added", "email_status")}
+                "people": [{k: p.get(k, "") for k in ("name", "title", "role", "confirmed", "added",
+                                                        "email_status")}
                            for p in card.people],
                 "summary": people_research.describe(card)})
             logger.info(f"People: {card.name} — {people_research.describe(card)}")

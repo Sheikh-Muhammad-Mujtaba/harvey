@@ -36,6 +36,9 @@ WITH pstats AS (
         MAX(status = 'queued') AS queued,
         MAX(email_status IN ('verified', 'risky') AND status != 'opted_out') AS emailable,
         MAX(status = 'opted_out') AS opted,
+        MAX(first_name != '' AND status != 'opted_out' AND (email_status IN ('verified', 'risky')
+            OR COALESCE(phone, '') != '' OR COALESCE(linkedin_url, '') != '')) AS named_direct,
+        MAX(first_name != '' AND status != 'opted_out') AS named,
         COUNT(*) AS n
     FROM prospects GROUP BY company_id
 )
@@ -51,10 +54,25 @@ SELECT * FROM (
                 WHEN ps.emailable THEN 'email_found'
                 WHEN ps.opted THEN 'opted_out'
                 WHEN COALESCE(c.phone, '') != '' THEN 'phone_only'
-                ELSE 'new' END AS lead_status
+                ELSE 'new' END AS lead_status,
+           CASE WHEN ps.named_direct THEN 'A'
+                WHEN ps.named THEN 'B'
+                WHEN ps.emailable OR COALESCE(c.phone, '') != '' THEN 'C'
+                ELSE 'D' END AS tier
     FROM companies c LEFT JOIN pstats ps ON ps.company_id = c.id
 ) leads
 """
+
+
+# How reachable a lead is (the contact gate): A a named person with a direct
+# line (deliverable email, phone or LinkedIn), B a named person with none yet,
+# C only the company's own inbox or phone, D no way in at all.
+TIERS = {
+    "A": "Named person, direct line",
+    "B": "Named person, no direct line",
+    "C": "Company inbox or phone only",
+    "D": "No way to reach them yet",
+}
 
 
 def _where(filters: dict, config) -> tuple[str, list]:
@@ -82,6 +100,10 @@ def _where(filters: dict, config) -> tuple[str, list]:
     if filters.get("status") in dict(STATUSES):
         where.append("lead_status = ?")
         params.append(filters["status"])
+    tiers = [t for t in str(filters.get("tier") or "").upper().replace(",", "") if t in TIERS]
+    if tiers:
+        where.append(f"tier IN ({', '.join('?' * len(tiers))})")
+        params += tiers
     if str(filters.get("starred") or "").lower() in ("1", "true", "yes", "on"):
         where.append("starred = 1")
     has = filters.get("has")
@@ -174,6 +196,7 @@ async def facets(state, config) -> dict:
     services = list((getattr(getattr(config, "icp", None), "service_tags", None) or {}).keys())
     return {"industries": industries, "locations": locations, "services": services,
             "statuses": [{"value": v, "label": label} for v, label in STATUSES],
+            "tiers": [{"value": t, "label": f"{t}: {label}"} for t, label in TIERS.items()],
             "sorts": list(SORTS)}
 
 
@@ -181,7 +204,7 @@ CSV_COLUMNS = [
     "company", "service", "business_type", "location", "website", "phone", "email",
     "email_status", "contact_person", "contact_title", "whatsapp", "address", "facebook",
     "instagram", "linkedin", "lead_score", "score_reason", "est_monthly_budget", "starred",
-    "status", "notes", "map_or_source", "added",
+    "status", "reach", "notes", "map_or_source", "added",
 ]
 
 
@@ -222,6 +245,7 @@ def to_csv(rows: list[dict]) -> str:
             "est_monthly_budget": score.get("est_monthly_budget", ""),
             "starred": "yes" if r.get("starred") else "",
             "status": status_label.get(r.get("lead_status"), r.get("lead_status")),
+            "reach": f"{r['tier']}: {TIERS[r['tier']]}" if r.get("tier") in TIERS else "",
             "notes": r.get("notes"),
             "map_or_source": r.get("source_url"),
             "added": r.get("created_at"),
@@ -231,7 +255,8 @@ def to_csv(rows: list[dict]) -> str:
 
 def filters_from(params) -> dict:
     """The filter keys from a query string or a dict, nothing else."""
-    keys = ("service", "industry", "location", "min_score", "status", "starred", "has", "q", "sort")
+    keys = ("service", "industry", "location", "min_score", "status", "tier", "starred", "has",
+            "q", "sort")
     return {k: params.get(k) for k in keys if params.get(k) not in (None, "")}
 
 
@@ -249,7 +274,8 @@ EMAIL_STATUS = {
 LEAD_COLUMNS = [  # (header, width, key)
     ("Star", 6, "star"), ("Company", 30, "company"), ("Lead type", 20, "service"),
     ("Business type", 18, "business_type"), ("Location", 24, "location"),
-    ("Score", 8, "lead_score"), ("Status", 16, "status"), ("Website", 30, "website"),
+    ("Score", 8, "lead_score"), ("Status", 16, "status"), ("Reach", 30, "tier"),
+    ("Website", 30, "website"),
     ("Phone", 18, "phone"), ("Email", 30, "email"), ("Email status", 20, "email_status"),
     ("Contact person", 22, "contact_person"), ("Title", 20, "contact_title"),
     ("Contacts", 10, "contacts"), ("WhatsApp", 18, "whatsapp"), ("Address", 34, "address"),
@@ -297,6 +323,7 @@ def _lead_values(r: dict) -> dict:
         "location": r.get("location"),
         "lead_score": r.get("lead_score"),
         "status": dict(STATUSES).get(r.get("lead_status"), r.get("lead_status")),
+        "tier": f"{r['tier']}: {TIERS[r['tier']]}" if r.get("tier") in TIERS else "",
         "website": r.get("website") or (f"https://{r['domain']}" if r.get("domain") else ""),
         "phone": r.get("phone") or (card.get("phone") if card.get("phone_confirmed") else ""),
         "email": r.get("email") or (card.get("email") if card.get("email_confirmed") else ""),
@@ -443,6 +470,7 @@ async def insights(state, config) -> dict:
             return await cur.fetchall()
 
         status_rows = dict(await one(f"SELECT lead_status, COUNT(*) FROM ({_BASE}) GROUP BY 1"))
+        tier_rows = dict(await one(f"SELECT tier, COUNT(*) FROM ({_BASE}) GROUP BY 1"))
         totals = (await one(
             f"""SELECT COUNT(*), COALESCE(SUM(starred), 0), COUNT(lead_score),
                        ROUND(AVG(lead_score)), COALESCE(SUM(COALESCE(phone, '') != ''), 0),
@@ -479,6 +507,8 @@ async def insights(state, config) -> dict:
                  "replied": status_rows.get("replied", 0),
                  "star_at": getattr(getattr(config, "lead_scoring", None), "star_at", 75)},
         "status": [{"key": k, "label": label, "count": status_rows.get(k, 0)} for k, label in STATUSES],
+        "tiers": [{"key": t, "label": f"{t}: {label}", "count": tier_rows.get(t, 0)}
+                  for t, label in TIERS.items()],
         "lead_types": sorted(({"label": k, "count": v} for k, v in tag_counts.items()),
                              key=lambda x: (x["label"] == "Not tagged", -x["count"])),
         "locations": [{"label": c, "count": n} for c, n in cities if c],

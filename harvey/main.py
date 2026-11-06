@@ -21,6 +21,7 @@ from harvey.pidfile import (
 from harvey.contact_lookup import run_contact_lookup
 from harvey.lead_scoring import run_lead_scoring
 from harvey.people_research import run_people_research
+from harvey.tasks import sync_reply_tasks
 from harvey.pipeline import run_profile_stage
 from harvey.state import StateManager
 
@@ -441,6 +442,12 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
                 tasks.append(("people", run_people_research(state, brain, config, env)))
 
             outcomes = await _run_agents(tasks)
+
+            # A follow-up due today for every reply now waiting on a person.
+            try:
+                await sync_reply_tasks(state)
+            except Exception as e:
+                logger.warning(f"Couldn't add reply follow-ups: {e}")
 
             # Phase 2: send — only after every reply-reading task this cycle
             # finished reading and handling replies (it returns True; a

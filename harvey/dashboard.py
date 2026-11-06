@@ -1685,13 +1685,11 @@ async def set_conversation_status(convo_id: str, request: Request):
     return {"success": True, "status": status}
 
 
-@app.get("/api/trend")
-async def get_trend(days: int = 14, tz: int = 0):
-    """Daily counts for the last `days` days in the viewer's time zone
-    (`tz`: minutes east of UTC; stored times are UTC): contacts found,
-    emails sent, first replies. Days with nothing are 0."""
+async def _daily_series(days: int, tz: int) -> dict:
+    """Daily counts for the last `days` days in the viewer's time zone (`tz`:
+    minutes east of UTC; stored times are UTC): companies added, contacts
+    found, emails sent, first replies. Days with nothing are 0."""
     from datetime import datetime, timedelta, timezone
-    days = max(1, min(90, days))
     tz = max(-840, min(840, tz))
     shift = f"{tz:+d} minutes"
     today = (datetime.now(timezone.utc) + timedelta(minutes=tz)).date()
@@ -1706,10 +1704,19 @@ async def get_trend(days: int = 14, tz: int = 0):
 
     return {
         "days": labels,
+        "added": await per_day("companies", "created_at"),
         "found": await per_day("prospects", "created_at"),
         "sent": await per_day("outbox", "sent_at", "AND status = 'sent'"),
         "replies": await per_day("conversations", "created_at"),
     }
+
+
+@app.get("/api/trend")
+async def get_trend(days: int = 14, tz: int = 0):
+    """Daily counts for the last `days` days (see _daily_series)."""
+    series = await _daily_series(max(1, min(90, days)), tz)
+    series.pop("added", None)
+    return series
 
 
 @app.get("/api/activity")
@@ -2297,6 +2304,21 @@ async def get_today():
                 "action": "Open the decisions desk", "tab": "outbox",
             })
 
+        from harvey import tasks as task_list
+        await task_list.sync_reply_tasks(state)
+        due = await task_list.counts(state)
+        stats["tasks"] = due
+        if due["overdue"] or due["today"]:
+            parts = [f"{due['overdue']} overdue" if due["overdue"] else "",
+                     f"{due['today']} due today" if due["today"] else ""]
+            items.append({
+                "key": "tasks", "tone": "bad" if due["overdue"] else "warn",
+                "title": "Follow-ups: " + " and ".join(p for p in parts if p),
+                "detail": ("Replies first: someone who wrote back hears from you within the "
+                           "hour far more often turns into a deal."),
+                "action": "Open tasks", "tab": "tasks",
+            })
+
         if open_convos:
             items.append({
                 "key": "replies", "tone": "good",
@@ -2618,21 +2640,52 @@ async def get_leads(request: Request):
         state = _state()
         await state.init_db()
         config = _config_or_none()
-        result = await leads.list_leads(state, leads.filters_from(request.query_params), config)
-        return result
+        try:
+            limit = max(1, min(int(request.query_params.get("limit") or leads.MAX_PAGE), leads.MAX_PAGE))
+        except ValueError:
+            limit = leads.MAX_PAGE
+        return await leads.list_leads(state, leads.filters_from(request.query_params), config,
+                                      limit=limit)
     except Exception as e:
         logger.exception("leads failed")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/api/insights")
-async def get_insights():
-    """Numbers for the Insights charts."""
+async def get_insights(days: int = 30, tz: int = 0):
+    """Numbers for the Insights charts: lead totals and splits, the deal
+    board, the funnel, and daily activity for the last `days` days with the
+    period before it for comparison."""
     from harvey import leads
     try:
+        from harvey import pipeline_board
         state = _state()
         await state.init_db()
-        return await leads.insights(state, _config_or_none())
+        config = _config_or_none()
+        data = await leads.insights(state, config)
+        board = await pipeline_board.board(state, config)
+        data["pipeline"] = [{"key": c["key"], "label": c["label"], "count": c["count"],
+                             "value": c["value"]} for c in board["stages"]]
+        days = max(7, min(90, days))
+        both = await _daily_series(days * 2, tz)
+        data["series"] = {k: v[days:] for k, v in both.items()}
+        data["previous"] = {k: sum(v[:days]) for k, v in both.items() if k != "days"}
+        data["period_days"] = days
+        stage = {c["key"]: c for c in data["pipeline"]}
+        tiers = {t["key"]: t["count"] for t in data["tiers"]}
+        k = data["kpis"]
+        data["funnel"] = [
+            {"key": "leads", "label": "Leads found", "count": k["leads"]},
+            {"key": "reachable", "label": "Reachable", "count": tiers.get("A", 0) + tiers.get("C", 0)},
+            {"key": "emailed", "label": "Emailed", "count": k["contacted"]},
+            {"key": "replied", "label": "Replied", "count": k["replied"]},
+            {"key": "meeting", "label": "Meeting or later", "count": sum(
+                stage.get(s, {}).get("count", 0) for s in ("meeting", "proposal", "negotiation", "won"))},
+            {"key": "won", "label": "Won", "count": stage.get("won", {}).get("count", 0)},
+        ]
+        data["open_value"] = sum(c["value"] for c in data["pipeline"] if c["key"] not in ("won", "lost"))
+        data["won_value"] = stage.get("won", {}).get("value", 0)
+        return data
     except Exception as e:
         logger.exception("insights failed")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -2809,6 +2862,207 @@ async def note_company(company_id: str, request: Request):
     await state.init_db()
     if not await add_note(state, company_id, text):
         return _refuse("unknown company", 404)
+    return {"success": True}
+
+
+# ── Deals, tasks, pitch briefs and sources (pipeline_board, tasks, pitch_brief) ──
+
+@app.get("/api/pipeline")
+async def get_pipeline(request: Request):
+    from harvey import pipeline_board
+    state = _state()
+    await state.init_db()
+    return await pipeline_board.board(state, _config_or_none(),
+                                      service=request.query_params.get("service") or "",
+                                      q=request.query_params.get("q") or "")
+
+
+@app.get("/api/companies/{company_id}/deal")
+async def get_deal(company_id: str):
+    """One company's deal: stage, value, tasks, pitch brief, sources."""
+    from harvey import pipeline_board, pitch_brief
+    from harvey import tasks as task_list
+    state = _state()
+    await state.init_db()
+    deal = await pipeline_board.deal(state, _config_or_none(), company_id)
+    if not deal:
+        return _refuse("unknown company", 404)
+    job = _brief_jobs.get(company_id)
+    return {"deal": deal, "stages": [{"key": k, "label": label} for k, label in pipeline_board.STAGES],
+            "tasks": [dict(t, due_text=task_list.describe_due(t.get("due_date") or ""))
+                      for t in await task_list.listing(state, company_id=company_id,
+                                                       include_done=True, limit=50)],
+            "brief": await pitch_brief.latest(state, company_id),
+            "brief_running": bool(job and not job["task"].done()),
+            "brief_error": (job or {}).get("error", ""),
+            "sources": await _sources(state, company_id)}
+
+
+async def _sources(state, company_id: str) -> list[dict]:
+    """Where each fact about a company came from: observations with a page."""
+    from harvey.signals import SIGNAL_CATALOG
+    labels = {s["code"]: s["label"] for s in SIGNAL_CATALOG}
+    kinds = {s["code"]: s.get("value_type", "") for s in SIGNAL_CATALOG}
+    async with state._connect() as db:
+        cur = await db.execute(
+            """SELECT signal_code, value_text, value_num, evidence_url, MAX(observed_at)
+               FROM observations WHERE company_id = ? AND COALESCE(evidence_url, '') != ''
+               GROUP BY signal_code, evidence_url ORDER BY MAX(observed_at) DESC LIMIT 40""",
+            (company_id,))
+        rows = await cur.fetchall()
+    out = []
+    for code, text, num, url, at in rows:
+        if text in (None, "") and not num:
+            continue            # a "no" (or zero): not a fact about them worth a source
+        if kinds.get(code) == "bool":
+            value = ""
+        elif text not in (None, ""):
+            value = "" if text.startswith(("{", "[")) else text   # cards are shown on their own
+        else:
+            value = f"{num:g}"
+        out.append({"signal": labels.get(code, code), "value": str(value)[:160],
+                    "url": url, "observed_at": at})
+    return out
+
+
+@app.post("/api/companies/{company_id}/stage")
+async def set_deal_stage(company_id: str, request: Request):
+    """{"stage": key or "" (back to automatic), "reason"?: why lost, "value"?: amount}"""
+    from harvey import pipeline_board
+    body = await _json_body(request)
+    if not isinstance(body.get("stage"), str):
+        return _refuse('expected {"stage": "..."}', 400)
+    state = _state()
+    await state.init_db()
+    try:
+        ok = await pipeline_board.set_stage(state, company_id, body["stage"],
+                                            reason=body.get("reason") or "", value=body.get("value"))
+    except ValueError as e:
+        return _refuse(str(e), 400)
+    if not ok:
+        return _refuse("unknown company", 404)
+    await state.log_action("deal_stage", "you", {"company_id": company_id, "stage": body["stage"],
+                                                 "reason": body.get("reason") or ""})
+    return {"success": True, "deal": await pipeline_board.deal(state, _config_or_none(), company_id)}
+
+
+@app.post("/api/companies/{company_id}/value")
+async def set_deal_value(company_id: str, request: Request):
+    from harvey import pipeline_board
+    body = await _json_body(request)
+    state = _state()
+    await state.init_db()
+    try:
+        ok = await pipeline_board.set_value(state, company_id, body.get("value"))
+    except ValueError as e:
+        return _refuse(str(e), 400)
+    return {"success": True} if ok else _refuse("unknown company", 404)
+
+
+_brief_jobs: dict[str, dict] = {}
+MAX_BRIEF_JOBS = 3
+
+
+@app.post("/api/companies/{company_id}/brief")
+async def start_brief(company_id: str):
+    """Write a pitch brief in the background (a few minutes); poll the deal."""
+    from harvey import pitch_brief
+    from harvey.config import load_config
+    try:
+        config = load_config()
+    except Exception as e:
+        return _refuse(f"config won't load: {e}", 500)
+    if getattr(config.brain, "provider", "claude") != "claude":
+        return _refuse("pitch briefs use Claude's web search; set brain.provider: claude", 400)
+    job = _brief_jobs.get(company_id)
+    if job and not job["task"].done():
+        return _refuse("a brief for this company is already being written", 409)
+    if sum(1 for j in _brief_jobs.values() if not j["task"].done()) >= MAX_BRIEF_JOBS:
+        return _refuse(f"{MAX_BRIEF_JOBS} briefs are already being written; try again shortly", 409)
+    state = _state()
+    await state.init_db()
+    async with state._connect() as db:
+        cur = await db.execute("SELECT 1 FROM companies WHERE id = ?", (company_id,))
+        if not await cur.fetchone():
+            return _refuse("unknown company", 404)
+    brain = _job_brain(config)
+    record = {"error": ""}
+
+    async def go():
+        try:
+            if await pitch_brief.generate(brain, state, config, company_id) is None:
+                record["error"] = getattr(brain, "paused_reason", "") or "no answer from Claude"
+        except Exception as e:
+            logger.exception("pitch brief failed")
+            record["error"] = str(e)
+
+    record["task"] = asyncio.create_task(go())
+    _brief_jobs[company_id] = record
+    return {"success": True, "message": "writing the brief (a few minutes)"}
+
+
+@app.get("/api/tasks")
+async def get_tasks(request: Request):
+    from harvey import tasks as task_list
+    state = _state()
+    await state.init_db()
+    await task_list.sync_reply_tasks(state)
+    done = str(request.query_params.get("done") or "").lower() in ("1", "true", "yes")
+    rows = await task_list.listing(state, company_id=request.query_params.get("company") or "",
+                                   include_done=done)
+    for r in rows:
+        r["due_text"] = task_list.describe_due(r.get("due_date") or "")
+    return {"tasks": rows, "counts": await task_list.counts(state)}
+
+
+@app.post("/api/tasks")
+async def create_task(request: Request):
+    """{"title", "company_id"?, "prospect_id"?, "due"?: date, today, tomorrow...}"""
+    from harvey import tasks as task_list
+    body = await _json_body(request)
+    state = _state()
+    await state.init_db()
+    try:
+        task_id = await task_list.add(state, body.get("title") or "",
+                                      company_id=str(body.get("company_id") or ""),
+                                      prospect_id=str(body.get("prospect_id") or ""),
+                                      due=body.get("due") or "", source=body.get("source") or "you")
+    except ValueError as e:
+        return _refuse(str(e), 400)
+    return {"success": True, "id": task_id}
+
+
+@app.post("/api/tasks/{task_id}/done")
+async def finish_task(task_id: str, request: Request):
+    from harvey import tasks as task_list
+    body = await _json_body(request)
+    state = _state()
+    await state.init_db()
+    if not await task_list.set_done(state, task_id, body.get("done", True) is not False):
+        return _refuse("unknown task", 404)
+    return {"success": True}
+
+
+@app.post("/api/tasks/{task_id}/edit")
+async def edit_task(task_id: str, request: Request):
+    from harvey import tasks as task_list
+    body = await _json_body(request)
+    state = _state()
+    await state.init_db()
+    try:
+        ok = await task_list.update(state, task_id, title=body.get("title"), due=body.get("due"))
+    except ValueError as e:
+        return _refuse(str(e), 400)
+    return {"success": True} if ok else _refuse("unknown task", 404)
+
+
+@app.post("/api/tasks/{task_id}/delete")
+async def remove_task(task_id: str):
+    from harvey import tasks as task_list
+    state = _state()
+    await state.init_db()
+    if not await task_list.delete(state, task_id):
+        return _refuse("unknown task", 404)
     return {"success": True}
 
 

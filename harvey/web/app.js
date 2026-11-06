@@ -11,27 +11,129 @@ let _desk = { items: [], i: 0 };
 // it. Stored per-browser; nothing is sent anywhere.
 
 const THEMES = ['auto', 'light', 'dark'];
+const ACCENTS = ['cobalt', 'indigo', 'fuchsia', 'graphite'];
+const THEME_NAMES = {auto: 'follows your system', light: 'light', dark: 'dark'};
+
+function store(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* private mode: this visit only */ }
+}
+
+function stored(key, allowed, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return allowed.includes(v) ? v : fallback;
+  } catch { return fallback; }
+}
 
 function applyTheme(mode) {
   const root = document.documentElement;
   if (mode === 'auto') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', mode);
   const btn = document.getElementById('theme-btn');
-  if (btn) btn.textContent = mode;
+  if (btn) {
+    btn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-theme-' + mode + '"/></svg>';
+    btn.title = 'Theme: ' + THEME_NAMES[mode] + ' (click to change)';
+    btn.setAttribute('aria-label', btn.title);
+  }
+  markChoices('data-theme-choice', mode);
+}
+
+function setTheme(mode) {
+  store('harvey-theme', mode);
+  applyTheme(mode);
+  if (currentTab === 'insights') loadInsights();     // charts read colours from the theme
 }
 
 function cycleTheme() {
-  const now = localStorage.getItem('harvey-theme') || 'auto';
-  const next = THEMES[(THEMES.indexOf(now) + 1) % THEMES.length];
-  try { localStorage.setItem('harvey-theme', next); } catch { /* private mode */ }
-  applyTheme(next);
+  const now = stored('harvey-theme', THEMES, 'auto');
+  setTheme(THEMES[(THEMES.indexOf(now) + 1) % THEMES.length]);
 }
 
-(function initTheme() {
-  let saved = 'auto';
-  try { saved = localStorage.getItem('harvey-theme') || 'auto'; } catch { /* ignore */ }
-  applyTheme(THEMES.includes(saved) ? saved : 'auto');
-})();
+function setAccent(accent) {
+  store('harvey-accent', accent);
+  if (accent === 'cobalt') document.documentElement.removeAttribute('data-accent');
+  else document.documentElement.setAttribute('data-accent', accent);
+  markChoices('data-accent-choice', accent);
+}
+
+function setDensity(density) {
+  store('harvey-density', density);
+  if (density === 'compact') document.documentElement.setAttribute('data-density', 'compact');
+  else document.documentElement.removeAttribute('data-density');
+  markChoices('data-density-choice', density);
+}
+
+function markChoices(attr, value) {
+  document.querySelectorAll('[' + attr + ']').forEach(b => {
+    const on = b.getAttribute(attr) === value;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+}
+
+// The sidebar: on a wide screen it folds to an icon rail (remembered here);
+// on a narrow one it's a drawer behind the menu button.
+const NARROW = window.matchMedia('(max-width: 900px)');
+
+function toggleSidebar() {
+  const root = document.documentElement;
+  const collapsed = root.getAttribute('data-sidebar') !== 'collapsed';
+  if (collapsed) root.setAttribute('data-sidebar', 'collapsed');
+  else root.removeAttribute('data-sidebar');
+  store('harvey-sidebar', collapsed ? 'collapsed' : 'open');
+  sidebarLabels();
+  if (currentTab === 'insights' && _insights) setTimeout(() => activityChart(document.getElementById('viz-activity'), _insights.series || {}), 220);
+}
+
+function sidebarLabels() {
+  const collapsed = document.documentElement.getAttribute('data-sidebar') === 'collapsed';
+  const btn = document.getElementById('side-collapse');
+  if (btn) {
+    const text = collapsed ? 'Expand the sidebar' : 'Collapse the sidebar';
+    btn.title = text;
+    btn.setAttribute('aria-label', text);
+  }
+  // Icon-only buttons still say what they are on hover and to screen readers.
+  document.querySelectorAll('nav button').forEach(b => {
+    const label = (b.querySelector('.label') || {}).textContent || '';
+    if (collapsed) b.title = label; else b.removeAttribute('title');
+    b.setAttribute('aria-label', label);
+  });
+}
+
+function toggleMenu(open) {
+  const body = document.body;
+  const on = open === undefined ? !body.classList.contains('menu-open') : !!open;
+  body.classList.toggle('menu-open', on);
+  const btn = document.getElementById('menu-btn');
+  if (btn) {
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Close the menu' : 'Open the menu');
+  }
+  if (on) {
+    const first = document.querySelector('#side-nav button.active') || document.querySelector('#side-nav button');
+    if (first) first.focus();
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('menu-open')) {
+    toggleMenu(false);
+    const btn = document.getElementById('menu-btn');
+    if (btn) btn.focus();
+  }
+});
+NARROW.addEventListener('change', () => toggleMenu(false));
+
+function initAppearance() {
+  sidebarLabels();
+  applyTheme(stored('harvey-theme', THEMES, 'auto'));
+  markChoices('data-accent-choice', stored('harvey-accent', ACCENTS, 'cobalt'));
+  markChoices('data-density-choice', stored('harvey-density', ['comfortable', 'compact'], 'comfortable'));
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAppearance);
+else initAppearance();
 
 // ── Utilities ──
 
@@ -414,6 +516,7 @@ function toggleVisibility(inputId) {
 
 function showTab(id, btn) {
   currentTab = id;
+  if (document.body.classList.contains('menu-open')) toggleMenu(false);
   if (id === 'companies') companyDrill = false;
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
@@ -427,6 +530,8 @@ function loadCurrentTab() {
     case 'today': loadLiveStatus(); loadToday(); loadTrend(); loadFunnel(); loadSetupStatus(); loadRuns(); loadTodayActivity(); break;
     case 'chat': loadChat(); break;
     case 'insights': loadInsights(); break;
+    case 'deals': loadDeals(); break;
+    case 'tasks': loadTasks(); break;
     case 'signals': loadSignals(); break;
     case 'discover': loadDiscoverProviders(); break;
     case 'companies': if (!companyDrill) loadCompanies(); loadLeadJobs(); break;
@@ -716,57 +821,237 @@ function vcols(items, unit, mark) {
   vizTable(['', unit[0].toUpperCase() + unit.slice(1)], items.map(i => [escHtml(i.label), i.count.toLocaleString()]));
 }
 
+// ── Insights ──
+// One hue for magnitude (--viz-1 and its ramp), grey for "none yet", status
+// colours only on deltas (always with an arrow and a number, never colour alone).
+let _insights = null;
+let _insightsResize = null;
+
+function insightsPeriod() {
+  return Number(stored('harvey-insights-days', ['7', '30', '90'], '30'));
+}
+
+function setInsightsPeriod(days) {
+  store('harvey-insights-days', String(days));
+  loadInsights();
+}
+
+function sumOf(a) { return (a || []).reduce((t, x) => t + (Number(x) || 0), 0); }
+
+function shortDate(iso, withDay) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', withDay ? {weekday: 'short', day: 'numeric', month: 'short'} : {day: 'numeric', month: 'short'});
+}
+
+// A small trend line for a KPI tile. Decorative: the number beside it is the data.
+function sparkline(values) {
+  const v = (values || []).map(x => Number(x) || 0);
+  if (v.length < 2 || !v.some(Boolean)) return '<span class="ins-spark empty" aria-hidden="true"></span>';
+  const max = Math.max(...v), w = 100, h = 32;
+  const pts = v.map((x, i) => [i * w / (v.length - 1), h - 2 - (x / max) * (h - 4)]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  return '<svg class="ins-spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+    '<path class="spark-area" d="' + line + ' L' + w + ' ' + h + ' L0 ' + h + ' Z"/>' +
+    '<path class="spark-line" d="' + line + '" vector-effect="non-scaling-stroke"/></svg>';
+}
+
+// Change against the previous period of the same length.
+function deltaChip(now, prev, days) {
+  if (!now && !prev) return '<span class="delta flat">no change</span>';
+  if (!prev) return '<span class="delta up">' + icon('trend-up') + 'new vs previous ' + days + 'd</span>';
+  const pct = Math.round(100 * (now - prev) / prev);
+  if (pct === 0) return '<span class="delta flat">same as previous ' + days + 'd</span>';
+  const up = pct > 0;
+  return '<span class="delta ' + (up ? 'up' : 'down') + '">' + icon(up ? 'trend-up' : 'trend-down') +
+    (up ? '+' : '') + pct + '% <span class="delta-vs">vs previous ' + days + 'd</span></span>';
+}
+
+// Whole-number axis ticks: a 1/2/5 step that covers the largest value in about four steps.
+function niceTicks(n) {
+  const raw = Math.max(1, n) / 4;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = Math.max(1, [1, 2, 5, 10].map(m => m * p).find(v => v >= raw));
+  const top = step * Math.max(1, Math.ceil(Math.max(1, n) / step));
+  const ticks = [];
+  for (let t = 0; t <= top; t += step) ticks.push(t);
+  return {top, ticks};
+}
+
+// Emails sent (area) and replies (line) per day, one axis (both are emails),
+// with a crosshair and tooltip on hover and a table for screen readers.
+function activityChart(el, s) {
+  const days = s.days || [];
+  const sent = (s.sent || []).map(Number), replies = (s.replies || []).map(Number);
+  const W = Math.max(280, el.clientWidth || 600), H = W < 500 ? 220 : 300;
+  const pad = {l: 34, r: 12, t: 12, b: 26};
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const {top, ticks} = niceTicks(Math.max(...sent, ...replies, 1));
+  const x = i => pad.l + (days.length < 2 ? iw / 2 : i * iw / (days.length - 1));
+  const y = v => pad.t + ih - (v / top) * ih;
+  const path = arr => arr.map((v, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
+  const every = Math.max(1, Math.ceil(days.length / Math.max(2, Math.floor(iw / 70))));
+  let svg = '<svg class="act-svg" width="' + W + '" height="' + H + '" role="img" aria-label="' +
+    escHtml('Emails sent and replies per day: ' + sumOf(sent) + ' sent, ' + sumOf(replies) + ' replies') + '">' +
+    '<defs><linearGradient id="act-fill" x1="0" x2="0" y1="0" y2="1">' +
+    '<stop offset="0%" class="act-stop-a"/><stop offset="100%" class="act-stop-b"/></linearGradient></defs>';
+  svg += ticks.map(t => '<line class="act-grid" x1="' + pad.l + '" x2="' + (W - pad.r) + '" y1="' + y(t) + '" y2="' + y(t) + '"/>' +
+    '<text class="act-ytick" x="' + (pad.l - 8) + '" y="' + (y(t) + 4) + '">' + t.toLocaleString() + '</text>').join('');
+  svg += days.map((d, i) => (i % every === 0 || i === days.length - 1) && !(i !== days.length - 1 && days.length - 1 - i < every / 2)
+    ? '<text class="act-xtick" x="' + x(i) + '" y="' + (H - 6) + '">' + escHtml(shortDate(d)) + '</text>' : '').join('');
+  if (days.length) {
+    svg += '<path class="act-area" d="' + path(sent) + ' L' + x(days.length - 1) + ' ' + y(0) + ' L' + x(0) + ' ' + y(0) + ' Z"/>' +
+      '<path class="act-line sent" d="' + path(sent) + '"/>' +
+      '<path class="act-line replies" d="' + path(replies) + '"/>' +
+      replies.map((v, i) => v ? '<circle class="act-dot replies" cx="' + x(i) + '" cy="' + y(v) + '" r="4"/>' : '').join('');
+  }
+  svg += '<line class="act-cross" y1="' + pad.t + '" y2="' + (pad.t + ih) + '" x1="-10" x2="-10"/>' +
+    '<circle class="act-hover sent" r="5" cx="-10" cy="-10"/><circle class="act-hover replies" r="5" cx="-10" cy="-10"/>' +
+    '<rect class="act-hit" x="' + pad.l + '" y="' + pad.t + '" width="' + iw + '" height="' + ih + '"/></svg>';
+  el.innerHTML = '<div class="act-wrap">' + svg + '<div class="act-tip" role="status"></div></div>' +
+    vizTable(['Day', 'Sent', 'Replies'], days.map((d, i) => [escHtml(shortDate(d, true)), sent[i] || 0, replies[i] || 0]));
+  const wrap = el.querySelector('.act-wrap'), tip = el.querySelector('.act-tip');
+  const cross = el.querySelector('.act-cross'), hs = el.querySelector('.act-hover.sent'), hr = el.querySelector('.act-hover.replies');
+  const show = clientX => {
+    const r = wrap.getBoundingClientRect();
+    const i = Math.max(0, Math.min(days.length - 1, Math.round((clientX - r.left - pad.l) / (iw / Math.max(1, days.length - 1)))));
+    const cx = x(i);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
+    hs.setAttribute('cx', cx); hs.setAttribute('cy', y(sent[i] || 0));
+    hr.setAttribute('cx', cx); hr.setAttribute('cy', y(replies[i] || 0));
+    tip.innerHTML = '<b>' + escHtml(shortDate(days[i], true)) + '</b>' +
+      '<span><i class="k sent"></i>Sent <b>' + (sent[i] || 0) + '</b></span>' +
+      '<span><i class="k replies"></i>Replies <b>' + (replies[i] || 0) + '</b></span>';
+    tip.style.display = 'flex';
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(W - tw, cx - tw / 2)) + 'px';
+    wrap.classList.add('hovering');
+  };
+  const hide = () => { tip.style.display = 'none'; wrap.classList.remove('hovering'); };
+  const hit = el.querySelector('.act-hit');
+  hit.addEventListener('mousemove', e => show(e.clientX));
+  hit.addEventListener('mouseleave', hide);
+  hit.addEventListener('touchstart', e => show(e.touches[0].clientX), {passive: true});
+  hit.addEventListener('touchmove', e => show(e.touches[0].clientX), {passive: true});
+}
+
+function funnelChart(steps) {
+  if (!steps.length || !steps[0].count) return '<p class="muted viz-empty">No leads yet.</p>';
+  const max = steps[0].count;
+  return '<ol class="funnel2">' + steps.map((s, i) => {
+    const prev = i ? steps[i - 1].count : 0;
+    const conv = i && prev ? Math.round(100 * s.count / prev) : null;
+    const w = s.count ? Math.max(2, 100 * s.count / max) : 0;
+    return '<li class="f-step" tabindex="0" data-tip="' + escHtml('<b>' + s.label + '</b><br>' + s.count.toLocaleString() +
+        (conv !== null ? ' · ' + conv + '% of ' + steps[i - 1].label.toLowerCase() : '')) + '">' +
+      '<div class="f-top"><span class="f-label">' + escHtml(s.label) + '</span>' +
+        '<span class="f-count">' + s.count.toLocaleString() + '</span></div>' +
+      '<div class="f-track"><span class="f-bar r' + Math.min(5, i + 1) + '" style="width:' + w + '%"></span></div>' +
+      (conv !== null ? '<span class="f-conv">' + conv + '% of previous step</span>' : '') + '</li>';
+  }).join('') + '</ol>' +
+  vizTable(['Step', 'Count'], steps.map(s => [escHtml(s.label), s.count.toLocaleString()]));
+}
+
+function stageChart(stages) {
+  const rows = stages.filter(s => s.key !== 'lead');
+  const total = rows.reduce((a, s) => a + s.count, 0);
+  if (!total) return '<p class="muted viz-empty">No deals yet. Star a lead, or let Harvey email some.</p>';
+  const max = Math.max(1, ...rows.map(s => s.count));
+  return '<div class="hbars stage-bars">' + rows.map(s =>
+    '<div class="hbar" tabindex="0" role="button" onclick="goTab(\'deals\')" data-tip="' + escHtml('<b>' + s.label + '</b><br>' +
+      s.count + ' deal' + (s.count === 1 ? '' : 's') + (s.value ? ' · ' + money(s.value) + ' a month' : '')) + '">' +
+    '<span class="hbar-label">' + escHtml(s.label) + '</span>' +
+    '<span class="hbar-track"><span class="hbar-fill' + (s.key === 'lost' ? ' muted' : '') + '" style="width:' +
+      (s.count ? Math.max(2, 100 * s.count / max) : 0) + '%"></span></span>' +
+    '<span class="hbar-val">' + s.count + (s.value ? '<small>' + money(s.value) + '</small>' : '') + '</span></div>').join('') + '</div>' +
+  vizTable(['Stage', 'Deals', 'Value a month'], rows.map(s => [escHtml(s.label), s.count, s.value ? money(s.value) : '–']));
+}
+
+function tierChart(tiers) {
+  const total = tiers.reduce((a, t) => a + t.count, 0);
+  if (!total) return '<p class="muted viz-empty">No leads yet.</p>';
+  const step = {A: 5, B: 3, C: 2, D: 0};
+  return '<div class="seg-bar" role="img" aria-label="Leads by how reachable they are">' + tiers.filter(t => t.count).map(t =>
+      '<span class="seg r' + step[t.key] + '" tabindex="0" style="flex:' + t.count + '" data-tip="' +
+      escHtml('<b>' + t.label + '</b><br>' + t.count.toLocaleString() + ' · ' + pctOf(t.count, total) + '%') + '"></span>').join('') +
+    '</div><div class="legend-rows">' + tiers.map(t =>
+      '<button type="button" class="legend-row as-link" onclick="openLeadsTier(' + escHtml(JSON.stringify(t.key)) + ')">' +
+      '<span class="legend-key"><i class="r' + step[t.key] + '"></i>' + escHtml(t.label) + '</span>' +
+      '<span class="legend-val">' + t.count.toLocaleString() + '</span><span class="legend-pct">' + pctOf(t.count, total) + '%</span></button>').join('') +
+    '</div><p class="muted viz-note">Find people (Companies tab) moves leads up from C and D.</p>';
+}
+
 async function loadInsights() {
   vizTip();
-  const [d, t] = await Promise.all([api('/api/insights'), api('/api/trend?days=14&tz=' + -new Date().getTimezoneOffset())]);
+  const days = insightsPeriod();
+  markChoices('data-period', String(days));
+  const d = await api('/api/insights?days=' + days + '&tz=' + -new Date().getTimezoneOffset());
   const kpiEl = document.getElementById('insights-kpis');
   if (!d) { kpiEl.innerHTML = offlineState(); return; }
   if (d.error) { kpiEl.innerHTML = emptyState(icon('alert'), 'Couldn\'t load insights', escHtml(d.error)); return; }
-  const k = d.kpis || {};
-  const tile = (label, value, note) =>
-    '<div class="kpi"><div class="kpi-label">' + label + '</div>' +
-    '<div class="kpi-main"><span class="kpi-value' + (value ? '' : ' zero') + '">' + value + '</span></div>' +
-    '<span class="kpi-note">' + note + '</span></div>';
-  kpiEl.className = 'kpis viz-kpis';
+  _insights = d;
+  const k = d.kpis || {}, s = d.series || {}, prev = d.previous || {};
+  const sent = sumOf(s.sent), replies = sumOf(s.replies), added = sumOf(s.added);
+  const rate = sent ? Math.round(1000 * replies / sent) / 10 : null;
+  const prevRate = prev.sent ? Math.round(1000 * (prev.replies || 0) / prev.sent) / 10 : null;
+  const tiers = Object.fromEntries((d.tiers || []).map(t => [t.key, t.count]));
+  const reachable = (tiers.A || 0) + (tiers.C || 0);
+  const openDeals = (d.pipeline || []).filter(c => !['lead', 'won', 'lost'].includes(c.key)).reduce((a, c) => a + c.count, 0);
+  const tile = (label, ic, value, foot, spark, extra) =>
+    '<div class="ins-kpi">' +
+      '<div class="ins-kpi-head"><span class="ins-kpi-icon">' + icon(ic) + '</span>' + label + '</div>' +
+      '<div class="ins-kpi-value' + (value === '0' || value === '–' ? ' zero' : '') + '">' + value + (extra || '') + '</div>' +
+      '<div class="ins-kpi-foot">' + foot + '</div>' + (spark || '') + '</div>';
   kpiEl.innerHTML =
-    tile('Leads found', (k.leads || 0).toLocaleString(), (k.with_website || 0).toLocaleString() + ' with a website') +
-    tile('Reachable', (k.with_email || 0).toLocaleString(), 'by email · <b>' + (k.with_phone || 0).toLocaleString() + '</b> by phone') +
-    tile('Starred', (k.starred || 0).toLocaleString(), 'score ' + k.star_at + '+ or starred by you') +
-    tile('Average score', k.avg_score === null || k.avg_score === undefined ? '&ndash;' : k.avg_score,
-         (k.scored || 0).toLocaleString() + ' scored · <b>' + (k.replied || 0) + '</b> replied');
+    tile('Leads added', 'companies', added.toLocaleString(), deltaChip(added, prev.added || 0, days), sparkline(s.added),
+         '<span class="ins-kpi-of">of ' + (k.leads || 0).toLocaleString() + '</span>') +
+    tile('Emails sent', 'outbox', sent.toLocaleString(), deltaChip(sent, prev.sent || 0, days), sparkline(s.sent)) +
+    tile('Replies', 'conversations', replies.toLocaleString(),
+         rate !== null ? '<span class="delta flat">' + rate + '% reply rate' + (prevRate !== null ? ' (was ' + prevRate + '%)' : '') + '</span>'
+           : deltaChip(replies, prev.replies || 0, days), sparkline(s.replies)) +
+    tile('Open pipeline', 'deals', d.open_value ? money(d.open_value) : openDeals.toLocaleString(),
+         d.open_value ? '<span class="delta flat">' + openDeals + ' open deal' + (openDeals === 1 ? '' : 's') + ' · a month</span>'
+           : '<span class="delta flat">open deals' + (d.won_value ? ' · ' + money(d.won_value) + ' won' : '') + '</span>') +
+    tile('Reachable', 'contacts', pctOf(reachable, k.leads || 0) + '%',
+         '<span class="delta flat">' + reachable.toLocaleString() + ' leads with a way in</span>', '',
+         '');
 
-  // Status: one whole split into its ordered stages.
-  const status = (d.status || []).filter(s => s.count);
-  const total = status.reduce((a, s) => a + s.count, 0);
+  const legend = document.getElementById('viz-activity-legend');
+  legend.innerHTML = '<span><i class="k sent"></i>Emails sent</span><span><i class="k replies"></i>Replies</span>';
+  const act = document.getElementById('viz-activity');
+  activityChart(act, s);
+  if (!_insightsResize) {
+    let t = null;
+    _insightsResize = () => { clearTimeout(t); t = setTimeout(() => {
+      if (currentTab === 'insights' && _insights) activityChart(document.getElementById('viz-activity'), _insights.series || {});
+    }, 150); };
+    window.addEventListener('resize', _insightsResize);
+  }
+
+  document.getElementById('viz-funnel').innerHTML = funnelChart(d.funnel || []);
+  const stages = d.pipeline || [];
+  document.getElementById('viz-deals').innerHTML = stageChart(stages);
+  document.getElementById('viz-deals-total').textContent = d.open_value ? money(d.open_value) + ' open a month' : '';
+  document.getElementById('viz-tiers').innerHTML = tierChart(d.tiers || []);
+
+  const status = (d.status || []).filter(x => x.count);
+  const total = status.reduce((a, x) => a + x.count, 0);
   const stepOf = key => ({new: 1, phone_only: 2, email_found: 3, queued: 3, contacted: 4, replied: 5, opted_out: 0})[key];
   document.getElementById('viz-status').innerHTML = total
-    ? '<div class="seg-bar" role="img" aria-label="Leads by status">' + status.map(s =>
-        '<span class="seg r' + stepOf(s.key) + '" tabindex="0" style="flex:' + s.count + '" data-tip="' +
-        escHtml('<b>' + s.label + '</b><br>' + s.count.toLocaleString() + ' · ' + pctOf(s.count, total) + '%') + '"></span>').join('') +
-      '</div><div class="legend-rows">' + status.map(s =>
-        '<div class="legend-row"><span class="legend-key"><i class="r' + stepOf(s.key) + '"></i>' + escHtml(s.label) + '</span>' +
-        '<span class="legend-val">' + s.count.toLocaleString() + '</span><span class="legend-pct">' + pctOf(s.count, total) + '%</span></div>').join('') + '</div>'
+    ? '<div class="seg-bar" role="img" aria-label="Leads by status">' + status.map(x =>
+        '<span class="seg r' + stepOf(x.key) + '" tabindex="0" style="flex:' + x.count + '" data-tip="' +
+        escHtml('<b>' + x.label + '</b><br>' + x.count.toLocaleString() + ' · ' + pctOf(x.count, total) + '%') + '"></span>').join('') +
+      '</div><div class="legend-rows cols">' + status.map(x =>
+        '<div class="legend-row"><span class="legend-key"><i class="r' + stepOf(x.key) + '"></i>' + escHtml(x.label) + '</span>' +
+        '<span class="legend-val">' + x.count.toLocaleString() + '</span><span class="legend-pct">' + pctOf(x.count, total) + '%</span></div>').join('') + '</div>'
     : '<p class="muted viz-empty">No leads yet.</p>';
 
   const bands = d.score_bands || [];
   document.getElementById('viz-scores').innerHTML = bands.some(b => b.count)
     ? vcols(bands.map(b => ({label: 'Score ' + b.band, short: b.band, count: b.count, band: b.band})), 'leads',
             i => parseInt(i.band, 10) >= k.star_at) +
-      '<p class="muted viz-note">The darker column is the starred band (' + k.star_at + '+).</p>'
-    : '<p class="muted viz-empty">Nothing scored yet. Ask Harvey to score some leads, or run <code>harvey score</code>.</p>';
-
-  if (t && Array.isArray(t.days)) {
-    const days = t.days.map((day, i) => {
-      const dt = new Date(day + 'T00:00:00');
-      return {label: dt.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'}),
-              short: (t.days.length - 1 - i) % 2 ? '' : dt.toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}),
-              count: Number((t.sent || [])[i]) || 0};
-    });
-    const sentTotal = days.reduce((a, x) => a + x.count, 0);
-    const replies = (t.replies || []).reduce((a, x) => a + (Number(x) || 0), 0);
-    document.getElementById('viz-sent').innerHTML = vcols(days, 'emails sent') +
-      '<p class="muted viz-note"><b>' + sentTotal + '</b> sent · <b>' + replies + '</b> repl' + (replies === 1 ? 'y' : 'ies') + ' in 14 days</p>';
-  }
+      '<p class="muted viz-note">Darker: the starred band (' + k.star_at + '+). ' + (k.scored || 0).toLocaleString() + ' scored, average ' +
+        (k.avg_score ?? '–') + '.</p>'
+    : '<p class="muted viz-empty">Nothing scored yet. Use Score leads on the Companies tab.</p>';
 
   const typesTotal = (d.lead_types || []).reduce((a, x) => a + x.count, 0);
   document.getElementById('viz-types').innerHTML = hbars(d.lead_types || [], typesTotal);
@@ -776,7 +1061,7 @@ async function loadInsights() {
   const top = d.top || [];
   document.getElementById('viz-top').innerHTML = top.length
     ? '<table class="nowrap"><thead><tr><th aria-label="Starred"></th><th>Company</th><th>Location</th><th>Phone</th><th>Score</th><th>Status</th></tr></thead><tbody>' +
-      top.map(c => '<tr class="clickable" onclick="openLead(' + escHtml(JSON.stringify(c.name)) + ')">' +
+      top.map(c => '<tr class="clickable" onclick="openCompany(' + escHtml(JSON.stringify(c.id)) + ', ' + escHtml(JSON.stringify(c.name)) + ')">' +
         '<td class="star-cell">' + (c.starred ? '<span class="star-on" aria-label="Starred">&#9733;</span>' : '') + '</td>' +
         '<td><span class="cell-main">' + escHtml(c.name) + '</span>' + serviceTags(c) + '</td>' +
         '<td>' + escHtml(c.location) + '</td><td class="muted">' + escHtml(c.phone) + '</td>' +
@@ -789,6 +1074,14 @@ function openLeadsAt(location) {
   goTab('companies');
   const el = document.getElementById('lf-location');
   if (el) { el.value = location; leadFilterChanged(); }
+}
+
+function openLeadsTier(tier) {
+  goTab('companies');
+  const el = document.getElementById('lf-tier');
+  if (el) {
+    loadLeadFacets().then(() => { el.value = tier; leadFilterChanged(); });
+  }
 }
 
 function openLead(name) {
@@ -814,6 +1107,7 @@ async function loadToday() {
   navCount('nav-outbox', (data.stats || {}).outbox_pending || 0);
   navCount('nav-signals', (data.stats || {}).signals_proposed || 0);
   navCount('nav-conversations', (data.stats || {}).needs_human || 0);
+  navTaskCount((data.stats || {}).tasks);
   _todayStats = data.stats || {};
   renderFigures(_todayStats);
 
@@ -2387,7 +2681,8 @@ const LEAD_STATUS = {
 function leadFilters() {
   const v = id => (document.getElementById(id) || {}).value || '';
   const f = {q: v('lf-q'), service: v('lf-service'), industry: v('lf-industry'), location: v('lf-location'),
-             min_score: v('lf-min-score'), status: v('lf-status'), has: v('lf-has'), sort: v('lf-sort')};
+             min_score: v('lf-min-score'), status: v('lf-status'), tier: v('lf-tier'), has: v('lf-has'),
+             sort: v('lf-sort')};
   if ((document.getElementById('lf-starred') || {}).checked) f.starred = '1';
   return Object.fromEntries(Object.entries(f).filter(([, x]) => x));
 }
@@ -2414,6 +2709,7 @@ async function loadLeadFacets() {
   fill('lf-industry', (f.industries || []).map(x =>
     '<option value="' + escHtml(x.value) + '">' + escHtml(x.value.replace(/_/g, ' ')) + ' (' + x.count + ')</option>'));
   fill('lf-status', (f.statuses || []).map(x => '<option value="' + escHtml(x.value) + '">' + escHtml(x.label) + '</option>'));
+  fill('lf-tier', (f.tiers || []).map(x => '<option value="' + escHtml(x.value) + '">' + escHtml(x.label) + '</option>'));
   fill('lf-locations', (f.locations || []).map(x => '<option value="' + escHtml(x.value) + '"></option>'));
 }
 
@@ -2429,6 +2725,45 @@ function scoreCell(c) {
   return meterHtml(c.lead_score);
 }
 
+// How reachable a lead is: A named person with a direct line, B named person,
+// C company inbox or phone only, D no way in yet.
+const TIERS = {
+  A: ['Named person, direct line', 'good'], B: ['Named person, no direct line', 'active'],
+  C: ['Company inbox or phone only', 'waiting'], D: ['No way to reach them yet', 'idle'],
+};
+
+function tierChip(tier) {
+  const t = TIERS[tier];
+  return t ? '<span class="badge tier t-' + t[1] + '" title="' + escHtml(t[0]) + '">' + tier + '</span>' : '';
+}
+
+let _leadsTotal = null;
+
+async function leadSummary(shown) {
+  const el = document.getElementById('lead-summary');
+  if (!el) return;
+  const filtered = Object.keys(leadFilters()).some(k => k !== 'sort');
+  if (filtered && _leadsTotal === null) {
+    const all = await api('/api/leads?limit=1');
+    _leadsTotal = all ? all.total : null;
+  }
+  el.innerHTML = filtered
+    ? shown.toLocaleString() + (_leadsTotal !== null ? ' of ' + _leadsTotal.toLocaleString() : '') + ' leads · ' +
+      '<button class="link-btn" type="button" onclick="clearLeadFilters()">Clear filters</button>'
+    : shown.toLocaleString() + ' leads';
+  if (!filtered) _leadsTotal = shown;
+}
+
+function clearLeadFilters() {
+  ['lf-q', 'lf-service', 'lf-industry', 'lf-location', 'lf-min-score', 'lf-status', 'lf-tier', 'lf-has'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const starred = document.getElementById('lf-starred');
+  if (starred) starred.checked = false;
+  leadFilterChanged();
+}
+
 function statusChip(c) {
   const [label, tone] = LEAD_STATUS[c.lead_status] || [c.lead_status || '', 'idle'];
   return '<span class="badge t-' + tone + '">' + escHtml(label) + '</span>';
@@ -2436,12 +2771,14 @@ function statusChip(c) {
 
 async function loadCompanies() {
   companyDrill = false;
+  _openDealId = null;
   const el = document.getElementById('companies-list');
   await loadLeadFacets();
   const data = await api('/api/leads?' + leadQuery());
   if (!data) { el.innerHTML = offlineState(); return; }
   if (data.error) { el.innerHTML = emptyState(icon('alert'), 'Couldn\'t load leads', escHtml(data.error)); return; }
   _companies = data.rows || [];
+  leadSummary(data.total || 0);
   if (!_companies.length) {
     el.innerHTML = '<div class="table-card">' + (Object.keys(leadFilters()).filter(k => k !== 'sort').length
       ? emptyState(icon('discover'), 'No leads match', 'Loosen a filter to see more.')
@@ -2451,7 +2788,7 @@ async function loadCompanies() {
     return;
   }
   let html = '<div class="table-card"><table class="nowrap"><thead><tr><th aria-label="Starred"></th><th>Company</th>' +
-    '<th>Business type</th><th>Location</th><th>Phone</th><th>Score</th><th>Status</th><th class="num">Contacts</th></tr></thead><tbody>';
+    '<th>Business type</th><th>Location</th><th>Phone</th><th>Score</th><th>Status</th><th>Reach</th><th class="num">Contacts</th></tr></thead><tbody>';
   _companies.forEach((c, i) => {
     const website = c.website || (c.domain ? 'https://' + c.domain : '');
     const domain = safeHref(website)
@@ -2467,6 +2804,7 @@ async function loadCompanies() {
       '<td class="muted">' + escHtml(c.phone) + '</td>' +
       '<td>' + scoreCell(c) + '</td>' +
       '<td>' + statusChip(c) + '</td>' +
+      '<td>' + tierChip(c.tier) + '</td>' +
       '<td class="num">' + (c.contact_count || 0) + '</td></tr>';
   });
   const shown = _companies.length, total = data.total || shown;
@@ -2572,6 +2910,330 @@ async function loadLeadJob(kind) {
   if (s.running) _jobTimers[kind] = setTimeout(() => loadLeadJob(kind), 10000);
 }
 
+// ── Deals: the pipeline board ──
+// Harvey moves cards itself as it emails and people reply; you drag a card
+// (or use its menu, for keyboard and phone) for what happens off email.
+let _dealDragging = false;
+let _dealTimer = null;
+let _dealStages = [];
+
+function money(n) {
+  if (!n) return '';
+  return Number(n).toLocaleString(undefined, {maximumFractionDigits: 0});
+}
+
+function dealFilterChanged(typing) {
+  clearTimeout(_dealTimer);
+  _dealTimer = setTimeout(loadDeals, typing ? 300 : 0);
+}
+
+async function loadDeals() {
+  const board = document.getElementById('deal-board');
+  if (!board) return;
+  await loadLeadFacets();
+  const svc = document.getElementById('df-service');
+  if (svc && svc.options.length === 1 && _leadFacets) {
+    svc.insertAdjacentHTML('beforeend', (_leadFacets.services || []).map(x =>
+      '<option value="' + escHtml(x) + '">' + escHtml(x) + '</option>').join(''));
+  }
+  const q = new URLSearchParams();
+  const qv = (document.getElementById('df-q') || {}).value || '';
+  const sv = (svc || {}).value || '';
+  if (qv) q.set('q', qv);
+  if (sv) q.set('service', sv);
+  const data = await api('/api/pipeline?' + q.toString());
+  if (!data) { board.innerHTML = offlineState(); return; }
+  _dealStages = (data.stages || []).map(c => ({key: c.key, label: c.label}));
+  const open = (data.stages || []).filter(c => !['won', 'lost'].includes(c.key));
+  const openValue = open.reduce((a, c) => a + (c.value || 0), 0);
+  const won = (data.stages || []).find(c => c.key === 'won') || {count: 0, value: 0};
+  document.getElementById('deal-summary').textContent = data.total
+    ? data.total + ' deals · ' + open.reduce((a, c) => a + c.count, 0) + ' open' +
+      (openValue ? ' worth ' + money(openValue) + ' a month' : '') + ' · ' + won.count + ' won'
+    : '';
+  if (!data.total) {
+    board.innerHTML = '<div class="table-card">' + emptyState(icon('deals'), 'No deals yet',
+      'A lead joins the board when it\'s starred, scores ' + 'high, or Harvey emails it. Star a few on the <b>Companies</b> tab to start.') + '</div>';
+    return;
+  }
+  board.innerHTML = (data.stages || []).map(col =>
+    '<section class="deal-col stage-' + col.key + (col.count ? '' : ' empty') + '" data-stage="' + col.key + '" ondragover="dealDragOver(event)" ' +
+      'ondragleave="this.classList.remove(\'drop\')" ondrop="dealDrop(event)" aria-label="' + escHtml(col.label) + '">' +
+    '<header class="deal-col-head"><span class="deal-col-name">' + escHtml(col.label) + '</span>' +
+      '<span class="deal-col-count">' + col.count + '</span>' +
+      (col.value ? '<span class="deal-col-value">' + money(col.value) + '</span>' : '') + '</header>' +
+    '<div class="deal-cards">' + (col.deals.length ? col.deals.map(dealCard).join('')
+      : '<p class="deal-empty">Drop a deal here</p>') + '</div></section>').join('');
+}
+
+function dealCard(d) {
+  const options = _dealStages.map(s => '<option value="' + s.key + '"' + (s.key === d.stage ? ' selected' : '') + '>' +
+    escHtml(s.label) + '</option>').join('');
+  const due = d.next_due ? '<span class="deal-due' + (d.next_due < new Date().toISOString().slice(0, 10) ? ' late' : '') +
+    '" title="Next follow-up">' + icon('tasks') + escHtml(d.next_due) + '</span>' : '';
+  return '<article class="deal-card" draggable="true" data-id="' + escHtml(d.id) + '" ' +
+      'ondragstart="dealDragStart(event)" ondragend="dealDragEnd(event)">' +
+    '<button class="deal-open" type="button" onclick="openCompany(' + escHtml(JSON.stringify(d.id)) + ', ' +
+      escHtml(JSON.stringify(d.name || '')) + ')">' +
+      '<span class="deal-name">' + (d.starred ? '<span class="star-on" aria-label="Starred">&#9733;</span> ' : '') +
+      escHtml(d.name) + '</span>' +
+      '<span class="deal-sub">' + escHtml([d.contact, (d.location || '').split(',')[0]].filter(Boolean).join(' · ')) + '</span>' +
+    '</button>' +
+    '<div class="deal-meta">' + (d.lead_score !== null && d.lead_score !== undefined ? meterHtml(d.lead_score) : '') +
+      serviceTags(d) + (d.deal_value ? '<span class="deal-value">' + money(d.deal_value) + '</span>' : '') + due + '</div>' +
+    (d.stage === 'lost' && d.deal_lost_reason ? '<p class="deal-reason">' + escHtml(d.deal_lost_reason) + '</p>' : '') +
+    '<div class="deal-foot"><span class="deal-by" title="' + (d.stage_by === 'you' ? 'You set this stage' : 'Harvey set this from its emails and replies') + '">' +
+      (d.stage_by === 'you' ? 'set by you' : 'auto') + '</span>' +
+      '<select class="deal-move" aria-label="Move ' + escHtml(d.name) + ' to stage" ' +
+        'onchange="moveDeal(' + escHtml(JSON.stringify(d.id)) + ', this.value, this)">' + options + '</select></div>' +
+  '</article>';
+}
+
+function dealDragStart(e) {
+  _dealDragging = true;
+  e.dataTransfer.setData('text/plain', e.currentTarget.dataset.id);
+  e.dataTransfer.effectAllowed = 'move';
+  e.currentTarget.classList.add('dragging');
+}
+
+function dealDragEnd(e) {
+  _dealDragging = false;
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.deal-col.drop').forEach(c => c.classList.remove('drop'));
+}
+
+function dealDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drop');
+}
+
+function dealDrop(e) {
+  e.preventDefault();
+  const col = e.currentTarget;
+  col.classList.remove('drop');
+  const id = e.dataTransfer.getData('text/plain');
+  if (id) moveDeal(id, col.dataset.stage);
+}
+
+async function moveDeal(id, stage, select) {
+  const body = {stage};
+  if (stage === 'lost') {
+    const reason = window.prompt('Why was it lost? (price, timing, went with someone else...)');
+    if (!reason || !reason.trim()) { loadDeals(); return; }
+    body.reason = reason.trim();
+  }
+  if (select) select.disabled = true;
+  const r = await api('/api/companies/' + encodeURIComponent(id) + '/stage', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (!r || r.success === false) showToast((r && r.message) || 'Couldn\'t move it.', 'error');
+  else showToast('Moved to ' + (r.deal ? r.deal.stage_label : stage) + '.', 'success');
+  if (currentTab === 'deals') loadDeals();
+  else if (companyDrill && _openDealId === id) loadDealPanel(id);
+}
+
+// Open one company's detail from anywhere (board, insights, tasks).
+async function openCompany(id, name) {
+  goTab('companies');
+  const q = document.getElementById('lf-q');
+  if (q) q.value = name || '';
+  await loadCompanies();
+  const i = _companies.findIndex(c => c.id === id);
+  if (i >= 0) showCompanyContacts(i);
+}
+
+// ── Tasks: follow-ups ──
+
+function navTaskCount(t) {
+  if (t) navCount('nav-tasks', (t.overdue || 0) + (t.today || 0));
+}
+
+const TASK_GROUPS = [
+  ['overdue', 'Overdue'], ['today', 'Today'], ['upcoming', 'Coming up'], ['someday', 'No date'], ['done', 'Done'],
+];
+
+function taskRow(t) {
+  return '<li class="task' + (t.done ? ' done' : '') + '">' +
+    '<label class="task-check"><input type="checkbox"' + (t.done ? ' checked' : '') +
+      ' onchange="toggleTask(' + escHtml(JSON.stringify(t.id)) + ', this.checked)" aria-label="Done: ' + escHtml(t.title) + '"></label>' +
+    '<div class="task-body"><div class="task-title">' + escHtml(t.title) + '</div>' +
+      '<div class="task-meta">' +
+        (t.company_name ? '<a href="#" onclick="openCompany(' + escHtml(JSON.stringify(t.company_id)) + ', ' +
+          escHtml(JSON.stringify(t.company_name)) + ');return false">' + escHtml(t.company_name) + '</a>' : '') +
+        (t.due_text ? '<span class="task-due b-' + t.bucket + '">' + escHtml(t.due_text) + '</span>' : '') +
+        (t.source === 'harvey' ? '<span class="tag">from Harvey</span>' : t.source === 'chat' ? '<span class="tag">from Ask Harvey</span>' : '') +
+      '</div></div>' +
+    '<button class="btn btn-ghost btn-sm btn-icon" type="button" title="Delete" aria-label="Delete task" ' +
+      'onclick="deleteTask(' + escHtml(JSON.stringify(t.id)) + ')">' + icon('trash') + '</button></li>';
+}
+
+async function loadTasks() {
+  const el = document.getElementById('tasks-list');
+  if (!el) return;
+  const done = (document.getElementById('tasks-show-done') || {}).checked;
+  const data = await api('/api/tasks' + (done ? '?done=1' : ''));
+  if (!data) { el.innerHTML = offlineState(); return; }
+  navTaskCount(data.counts);
+  const tasks = data.tasks || [];
+  if (!tasks.length) {
+    el.innerHTML = '<div class="table-card">' + emptyState(icon('tasks'), 'Nothing to follow up',
+      'Add one above, or open a company and add it there. Replies land here on their own.') + '</div>';
+    return;
+  }
+  el.innerHTML = TASK_GROUPS.map(([key, label]) => {
+    const rows = tasks.filter(t => t.bucket === key);
+    return rows.length ? '<div class="card task-group g-' + key + '"><div class="card-title">' + label +
+      ' <span class="muted">' + rows.length + '</span></div><ul class="task-list">' + rows.map(taskRow).join('') + '</ul></div>' : '';
+  }).join('');
+}
+
+async function addTask(event, companyId) {
+  event.preventDefault();
+  const form = event.target;
+  const title = form.querySelector('[name=title], #task-title');
+  const due = form.querySelector('[name=due], #task-due');
+  const body = {title: (title.value || '').trim(), due: due ? due.value : ''};
+  if (companyId) body.company_id = companyId;
+  if (!body.title) return;
+  const r = await api('/api/tasks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t add it.', 'error'); return; }
+  title.value = '';
+  if (companyId) loadDealPanel(companyId); else loadTasks();
+}
+
+async function toggleTask(id, done) {
+  const r = await api('/api/tasks/' + encodeURIComponent(id) + '/done', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({done})});
+  if (!r || r.success === false) { showToast('Couldn\'t update it.', 'error'); return; }
+  if (currentTab === 'tasks') loadTasks(); else if (_openDealId) loadDealPanel(_openDealId);
+}
+
+async function deleteTask(id) {
+  if (!window.confirm('Delete this task?')) return;
+  const r = await api('/api/tasks/' + encodeURIComponent(id) + '/delete', {method: 'POST'});
+  if (!r || r.success === false) { showToast('Couldn\'t delete it.', 'error'); return; }
+  if (currentTab === 'tasks') loadTasks(); else if (_openDealId) loadDealPanel(_openDealId);
+}
+
+// ── A company's deal panel: stage, value, follow-ups, pitch brief, sources ──
+let _openDealId = null;
+let _briefTimer = null;
+
+async function loadDealPanel(id) {
+  _openDealId = id;
+  clearTimeout(_briefTimer);
+  const el = document.getElementById('deal-panel');
+  const extra = document.getElementById('deal-extra');
+  if (!el || !extra) return;
+  const d = await api('/api/companies/' + encodeURIComponent(id) + '/deal');
+  if (!d || !d.deal || _openDealId !== id) return;
+  const deal = d.deal;
+  const options = (d.stages || []).map(s => '<option value="' + s.key + '"' + (s.key === deal.stage ? ' selected' : '') + '>' +
+    escHtml(s.label) + '</option>').join('');
+  const auto = deal.stage_by === 'you' && !['won', 'lost'].includes(deal.stage)
+    ? ' <button class="link-btn" type="button" onclick="moveDeal(' + escHtml(JSON.stringify(id)) + ', \'\')">let Harvey track it</button>' : '';
+  const openTasks = (d.tasks || []).filter(t => !t.done);
+  el.innerHTML =
+    '<div class="deal-bar card">' +
+      '<label class="deal-field"><span>Stage</span><select class="form-input" onchange="moveDeal(' + escHtml(JSON.stringify(id)) + ', this.value, this)">' +
+        options + '</select></label>' +
+      '<span class="deal-by-text">' + (deal.stage_by === 'you' ? 'Set by you' : 'Tracked by Harvey') + auto + '</span>' +
+      (deal.stage === 'lost' && deal.deal_lost_reason ? '<span class="deal-reason">Lost: ' + escHtml(deal.deal_lost_reason) + '</span>' : '') +
+      '<form class="deal-field" onsubmit="saveDealValue(event, ' + escHtml(JSON.stringify(id)) + ')"><span>Value a month</span>' +
+        '<input class="form-input" name="value" inputmode="decimal" placeholder="e.g. 150000 or 1.5 lakh" value="' +
+        escHtml(deal.deal_value ? String(deal.deal_value) : '') + '"><button class="btn btn-secondary btn-sm" type="submit">Save</button></form>' +
+    '</div>';
+  extra.innerHTML =
+      briefCardHtml(d, id) +
+      '<div class="card"><div class="card-title">Follow-ups <span class="muted">' + openTasks.length + ' open</span></div>' +
+        ((d.tasks || []).length ? '<ul class="task-list">' + d.tasks.map(t => taskRow(Object.assign({}, t, {
+          company_name: ''}))).join('') + '</ul>' : '<p class="muted small">No follow-ups yet.</p>') +
+        '<form class="task-add inline" onsubmit="addTask(event, ' + escHtml(JSON.stringify(id)) + ')">' +
+          '<input class="form-input" name="title" maxlength="200" placeholder="e.g. Send the proposal" aria-label="New follow-up" required>' +
+          '<select class="form-input" name="due" aria-label="Due"><option value="today">Today</option><option value="tomorrow">Tomorrow</option>' +
+          '<option value="next week">Next week</option><option value="">No date</option></select>' +
+          '<button class="btn btn-secondary btn-sm" type="submit">Add</button></form></div>' +
+      sourcesCardHtml(d.sources || []);
+  if (d.brief_running) _briefTimer = setTimeout(() => loadDealPanel(id), 8000);
+}
+
+async function saveDealValue(event, id) {
+  event.preventDefault();
+  const value = event.target.querySelector('[name=value]').value;
+  const r = await api('/api/companies/' + encodeURIComponent(id) + '/value', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({value})});
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t save it.', 'error'); return; }
+  showToast('Saved.', 'success');
+}
+
+async function writeBrief(id, btn) {
+  if (btn) btn.disabled = true;
+  const r = await api('/api/companies/' + encodeURIComponent(id) + '/brief', {method: 'POST'});
+  if (!r || r.success === false) {
+    showToast((r && r.message) || 'Couldn\'t start it.', 'error');
+    if (btn) btn.disabled = false;
+    return;
+  }
+  showToast('Writing the brief: a few minutes.', 'success');
+  loadDealPanel(id);
+}
+
+const APPROACH = {
+  discover: ['Help them see the problem', 'They don\'t feel it yet: ask, don\'t pitch.'],
+  reframe: ['Reframe what they live with', 'They know it but are comfortable: lead with an insight.'],
+  evaluate: ['Win the comparison', 'They\'re choosing: differentiate on what they care about.'],
+};
+
+function briefCardHtml(d, id) {
+  const b = d.brief;
+  const button = '<button class="btn btn-' + (b ? 'secondary' : 'primary') + ' btn-sm" type="button" ' +
+    (d.brief_running ? 'disabled' : '') + ' onclick="writeBrief(' + escHtml(JSON.stringify(id)) + ', this)">' +
+    icon('brief') + (d.brief_running ? 'Writing&hellip;' : b ? 'Rewrite' : 'Write pitch brief') + '</button>';
+  const head = '<div class="card-title brief-head">Pitch brief' + button + '</div>';
+  if (!b) {
+    return '<div class="card brief-card">' + head + '<p class="muted small">' + (d.brief_running
+      ? '<span class="pulse" aria-hidden="true"></span> Claude is researching them and planning the pitch.'
+      : 'How to sell to them: the angle, what doing nothing costs them, questions for the first call, likely objections and the next step. Its angle also shapes Harvey\'s emails to them.') +
+      (d.brief_error ? '<br><span class="bad-text">Last try failed: ' + escHtml(d.brief_error) + '</span>' : '') + '</p></div>';
+  }
+  const list = items => '<ul>' + items.map(x => '<li>' + escHtml(x) + '</li>').join('') + '</ul>';
+  const a = APPROACH[b.approach] || ['', ''];
+  const section = (title, body) => body ? '<div class="brief-sec"><h4>' + title + '</h4>' + body + '</div>' : '';
+  const link = u => safeHref(u) ? '<a href="' + safeHref(u) + '" target="_blank" rel="noopener noreferrer">' +
+    escHtml(u.replace(/^https?:\/\//, '').slice(0, 60)) + '</a>' : '';
+  return '<div class="card brief-card wide">' + head +
+    '<div class="brief-approach"><span class="badge t-note">' + escHtml(a[0]) + '</span> <span class="muted">' +
+      escHtml(b.approach_why || a[1]) + '</span></div>' +
+    (b.snapshot ? '<p class="brief-snapshot">' + escHtml(b.snapshot) + '</p>' : '') +
+    '<div class="brief-grid">' +
+      section('Lead with', '<p>' + escHtml(b.angle) + '</p>') +
+      section('Cost of doing nothing', b.cost_of_inaction ? '<p>' + escHtml(b.cost_of_inaction) + '</p>' : '') +
+      section('Opening line', b.opening_line ? '<p class="brief-quote">' + escHtml(b.opening_line) + '</p>' : '') +
+      section('Next step', b.next_step ? '<p>' + escHtml(b.next_step) + '</p>' : '') +
+      section('Who to talk to', b.who_to_talk_to ? '<p>' + escHtml(b.who_to_talk_to) + '</p>' : '') +
+      section('How our offer fits', (b.value_map || []).length ? list(b.value_map) : '') +
+      section('Questions for the first call', (b.discovery_questions || []).length ? '<ol>' +
+        b.discovery_questions.map(q => '<li>' + escHtml(q) + '</li>').join('') + '</ol>' : '') +
+      section('Objections', (b.objections || []).length ? '<dl class="brief-objections">' + b.objections.map(o =>
+        '<dt>' + escHtml(o.objection) + '</dt><dd>' + escHtml(o.response) + '</dd>').join('') + '</dl>' : '') +
+      section('Touch plan', (b.touches || []).length ? '<ol class="brief-touches">' + b.touches.map(t =>
+        '<li><span class="tag">Day ' + t.day + ' · ' + escHtml(t.channel) + '</span> ' + escHtml(t.angle) + '</li>').join('') + '</ol>' : '') +
+      section('Trust builders', (b.trust || []).length ? list(b.trust) : '') +
+      section('Not known yet', (b.gaps || []).length ? list(b.gaps) : '') +
+    '</div>' +
+    ((b.sources || []).length ? '<p class="muted small brief-sources">Sources: ' + b.sources.map(link).filter(Boolean).join(' · ') + '</p>' : '') +
+    '<p class="muted small">Written ' + escHtml(b.created_at || '') + ' UTC by Claude from what Harvey knows and a web search. Check facts before you quote them.</p>' +
+  '</div>';
+}
+
+function sourcesCardHtml(rows) {
+  if (!rows.length) return '';
+  return '<div class="card"><div class="card-title">Where the facts came from</div><ul class="source-list">' +
+    rows.map(r => '<li><span class="source-signal">' + escHtml(r.signal) + '</span>' +
+      (r.value ? ' <span class="muted">' + escHtml(r.value) + '</span>' : '') +
+      (safeHref(r.url) ? '<br><a href="' + safeHref(r.url) + '" target="_blank" rel="noopener noreferrer">' +
+        escHtml(r.url.replace(/^https?:\/\//, '').slice(0, 70)) + '</a>' : '') + '</li>').join('') + '</ul></div>';
+}
+
 // Which of your services a lead is for (icp.service_tags), as chips.
 function serviceTags(row) {
   return (row.service_tags || []).map(t => ' <span class="tag service">' + escHtml(t) + '</span>').join('');
@@ -2645,8 +3307,9 @@ function peopleCardHtml(company) {
       : p.confirmed ? '<span class="tag">' + escHtml(p.note || 'confirmed') + '</span>'
       : '<span class="tag warn">unconfirmed</span>';
     const links = [link(p.confirmed_on || p.source, 'source'), link(p.linkedin, 'LinkedIn')].filter(Boolean).join(' · ');
+    const role = {buyer: 'signs off', champion: 'feels the problem', both: 'signs off and feels the problem'}[p.role];
     return '<li><div><b>' + escHtml(p.name) + '</b>' + (p.title ? ' <span class="muted">' + escHtml(p.title) + '</span>' : '') +
-      ' ' + state + '</div>' +
+      ' ' + state + (role ? ' <span class="tag role-' + escHtml(p.role) + '">' + role + '</span>' : '') + '</div>' +
       ((p.why || (!p.confirmed && p.note)) ? '<div class="muted">' + escHtml(p.confirmed ? p.why : (p.note || p.why)) + '</div>' : '') +
       (links ? '<div class="muted">' + links + '</div>' : '') + '</li>';
   }).join('');
@@ -2692,7 +3355,9 @@ async function showCompanyContacts(index) {
     '&larr; All companies</button>' +
     '<div class="lead-head">' + starButton(company, index) + '<h3>' + escHtml(company.name) + '</h3>' + serviceTags(company) +
     (company.lead_status ? ' ' + statusChip(company) : '') + '</div>' +
+    '<div id="deal-panel" class="deal-panel"></div>' +
     '<div class="lead-cards">' + contactCardHtml(company) + scoreCardHtml(company) + peopleCardHtml(company) + notesHtml(company, index) + '</div>' +
+    '<div id="deal-extra" class="lead-cards"></div>' +
     '<div class="card flush"><div class="card-head"><h3>Contacts</h3>' +
     '<span class="meta">' + escHtml([company.industry, company.location].filter(Boolean).join(' · ')) + '</span></div>';
   if (!data || !data.length) {
@@ -2712,6 +3377,7 @@ async function showCompanyContacts(index) {
     html += '</tbody></table></div>';
   }
   el.innerHTML = html;
+  loadDealPanel(company.id);
 }
 
 async function submitFeedback(entityType, entityId, promptText) {
@@ -3255,6 +3921,7 @@ setInterval(async () => {
   if (!data) return;
   navCount('nav-today', (data.items || []).filter(i => i.tone !== 'good').length);
   navCount('nav-outbox', (data.stats || {}).outbox_pending || 0);
+  navTaskCount((data.stats || {}).tasks);
 }, 20000);
 
 // Data tabs: auto-refresh live views without clobbering anything in progress.
@@ -3271,5 +3938,7 @@ setInterval(() => {
     case 'activity': loadActivity(); break;
     case 'usage': loadUsage(); break;
     case 'controls': loadLogs(); break;
+    case 'deals': if (!_dealDragging) loadDeals(); break;
+    case 'tasks': if (!document.activeElement || !document.activeElement.closest('#tasks-list')) loadTasks(); break;
   }
 }, 15000);

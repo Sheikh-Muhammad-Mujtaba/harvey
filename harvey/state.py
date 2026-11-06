@@ -532,6 +532,42 @@ MIGRATIONS: list[str] = [
     ALTER TABLE companies ADD COLUMN lead_score INTEGER DEFAULT NULL;
     CREATE INDEX IF NOT EXISTS idx_companies_lead_score ON companies(lead_score);
     """,
+
+    # ── v16: the deal pipeline, tasks and pitch briefs ──
+    """
+    -- deal_stage: a stage the operator set by hand ('' = follow Harvey's own
+    -- activity; see pipeline.py, which works the shown stage out on read).
+    -- deal_value: what the deal is worth a month, in the operator's currency.
+    ALTER TABLE companies ADD COLUMN deal_stage TEXT DEFAULT '';
+    ALTER TABLE companies ADD COLUMN deal_stage_at TIMESTAMP DEFAULT NULL;
+    ALTER TABLE companies ADD COLUMN deal_value REAL DEFAULT NULL;
+    ALTER TABLE companies ADD COLUMN deal_lost_reason TEXT DEFAULT '';
+
+    -- Follow-ups. ref: a key for tasks Harvey makes itself (a reply waiting
+    -- on you), so the same one is never made twice.
+    CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        company_id TEXT DEFAULT '',
+        prospect_id TEXT DEFAULT '',
+        title TEXT NOT NULL,
+        due_date TEXT DEFAULT '',
+        done INTEGER DEFAULT 0,
+        done_at TIMESTAMP DEFAULT NULL,
+        source TEXT DEFAULT 'you',
+        ref TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_ref ON tasks(ref) WHERE ref != '';
+    CREATE INDEX IF NOT EXISTS idx_tasks_open ON tasks(done, due_date);
+
+    -- The latest pitch brief per company (pitch_brief.py).
+    CREATE TABLE IF NOT EXISTS briefs (
+        company_id TEXT PRIMARY KEY,
+        service TEXT DEFAULT '',
+        content_json TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """,
 ]
 
 BRAIN_PROVIDERS = ("claude", "codex")

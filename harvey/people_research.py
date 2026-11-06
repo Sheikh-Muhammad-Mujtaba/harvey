@@ -48,6 +48,8 @@ CALL_TIMEOUT_SECONDS = 240
 OWN_PAGES = ("about", "about-us", "team", "our-team", "leadership", "management", "contact",
              "contact-us", "")
 NOT_READ = ("linkedin.com",)   # never fetched, whatever Claude cites
+ROLES = {"buyer": "Signs off on buying.", "champion": "Feels the problem day to day.",
+         "both": "Signs off and feels the problem.", "other": ""}
 _NAME_PART = re.compile(r"^[^\W\d_][^\W\d_'.\-]*(?:['.\-][^\W\d_]+)*\.?$")
 
 
@@ -113,7 +115,10 @@ def build_prompt(company: dict, service: str, roles: list[str], max_people: int)
 {fence(chr(10).join(facts), "company record")}
 
 Look for (best first): {want}. The owner or managing director also counts.
-At most {max_people} people.
+At most {max_people} people. Try to find two kinds of person, since deals with both close far more
+often: the one who signs (owner, MD, CEO, finance head: "buyer") and the one who feels the problem
+every day and would push for it (the marketing, operations or IT lead: "champion"). In a small
+business they're often the same person ("both").
 
 Rules:
 - Only report people you saw named in your search results, with the URL of the page that names
@@ -131,6 +136,7 @@ Return JSON:
 {{"match": "exact" or "unsure",
   "people": [{{"first_name": "", "last_name": "", "title": "", "source_url": "",
               "email": "", "phone": "", "contact_source_url": "", "linkedin": "",
+              "role": "buyer" | "champion" | "both" | "other",
               "why": "<a few words: why this person decides>"}}],
   "note": "<a few words on what you found>"}}"""
 
@@ -219,7 +225,9 @@ async def _check(card, state, config, env, company, first, last, raw, named, exi
         linkedin = ""
     if source and domain_of(source).endswith("linkedin.com"):
         linkedin, source = linkedin or source, ""
+    role = str(raw.get("role") or "").strip().lower()
     person = {"name": f"{first} {last}", "title": str(raw.get("title") or "").strip()[:120],
+              "role": role if role in ROLES else "other",
               "why": str(raw.get("why") or "").strip()[:200], "source": source,
               "linkedin": linkedin, "confirmed": False, "confirmed_on": "", "email": "",
               "email_status": "", "phone": "", "added": False, "prospect_id": ""}
@@ -258,6 +266,7 @@ async def _check(card, state, config, env, company, first, last, raw, named, exi
         person["phone"] = phone
 
     notes = [f"{person['title']} at {card.name}." if person["title"] else "",
+             ROLES.get(person["role"], ""),
              person["why"], f"Found by web search; named on {proof}."]
     prospect = Prospect(
         first_name=first, last_name=last, title=person["title"] or "Decision maker",

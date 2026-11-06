@@ -380,10 +380,48 @@ async def _find_people(turn, a):
     if card is None:
         raise ToolError("Claude gave no answer (paused or out of quota); try again later.")
     return {"company": card.name, "summary": people_research.describe(card),
-            "people": [{k: p.get(k, "") for k in ("name", "title", "confirmed", "added",
+            "people": [{k: p.get(k, "") for k in ("name", "title", "role", "confirmed", "added",
                                                   "email", "email_status", "phone",
                                                   "linkedin", "note")} for p in card.people],
             "note": "Only confirmed people became contacts; only verified emails are sent to."}
+
+
+async def _deal_stage(turn, a):
+    company = await _company(turn, _need(a, "company"))
+    body = {"stage": str(a.get("stage") or "").strip().lower()}
+    if a.get("reason"):
+        body["reason"] = str(a["reason"])
+    if a.get("value") not in (None, ""):
+        body["value"] = a["value"]
+    result = await _call(turn, "POST", f"/api/companies/{company['id']}/stage", body)
+    return {"company": company["name"], **(result if isinstance(result, dict) else {"result": result})}
+
+
+async def _add_task(turn, a):
+    body = {"title": _need(a, "title"), "due": str(a.get("due") or ""), "source": "chat"}
+    if a.get("company"):
+        body["company_id"] = (await _company(turn, str(a["company"])))["id"]
+    return await _call(turn, "POST", "/api/tasks", body)
+
+
+async def _brief(turn, a):
+    company = await _company(turn, _need(a, "company"))
+    result = await _call(turn, "POST", f"/api/companies/{company['id']}/brief")
+    return {"company": company["name"], "company_id": company["id"],
+            **(result if isinstance(result, dict) else {"result": result}),
+            "note": "Runs in the background; read it with show_brief in a few minutes."}
+
+
+async def _show_brief(turn, a):
+    company = await _company(turn, _need(a, "company"))
+    deal = await _call(turn, "GET", f"/api/companies/{company['id']}/deal")
+    if not isinstance(deal, dict) or "deal" not in deal:
+        return deal
+    return {"company": company["name"], "stage": deal["deal"].get("stage_label"),
+            "brief": deal.get("brief"), "being_written": deal.get("brief_running"),
+            "error": deal.get("brief_error"), "open_tasks": [
+                {k: t.get(k) for k in ("id", "title", "due_date", "bucket")}
+                for t in deal.get("tasks", []) if not t.get("done")]}
 
 
 async def _export(turn, a):
@@ -515,10 +553,31 @@ def build_tools() -> list[Tool]:
              "companies done, contacts added, unconfirmed, and why it stopped.", False, None),
         Tool("stop_people_research", "", "Stop the background people research after the "
              "current company.", True, _post(lambda a: "/api/people/research/stop")),
-        Tool("export_leads", "service?, industry?, location?, min_score?, status?, starred?, has?, q?, sort?",
+        Tool("pipeline", "", "The deal board: every deal by stage (lead, qualified, contacted, "
+             "replied, meeting, proposal, negotiation, won, lost) with counts and value.",
+             False, None),
+        Tool("set_deal_stage", "company, stage, reason? (needed for lost), value? (a month)",
+             "Move a deal to a stage by hand, for what happens off email (a call booked, a "
+             "proposal sent, signed). stage \"\" hands it back to Harvey's automatic stage.",
+             True, _deal_stage),
+        Tool("tasks", "", "Open follow-ups, overdue first (replies waiting on the operator "
+             "are added automatically, due today).", False, None),
+        Tool("add_task", "title, company?, due? (YYYY-MM-DD, today, tomorrow, next week, in N days)",
+             "Add a follow-up for the operator.", True, _add_task),
+        Tool("complete_task", "id", "Mark a follow-up done.", True,
+             _post(lambda a: f"/api/tasks/{_need(a, 'id')}/done", lambda a: {"done": True})),
+        Tool("pitch_brief", "company (name or id)",
+             "Write a pitch brief in the background (a few minutes, web search): the approach, "
+             "angle, cost of inaction, value map, objections with answers, discovery "
+             "questions, next step, opening line and a touch plan. Its angle also goes to the "
+             "writer for that company's emails.", True, _brief),
+        Tool("show_brief", "company (name or id)",
+             "A company's pitch brief (if written), deal stage and open follow-ups.",
+             False, _show_brief),
+        Tool("export_leads", "service?, industry?, location?, min_score?, status?, tier?, starred?, has?, q?, sort?",
              "An Excel download (Leads sheet plus a Contacts sheet) of the leads matching these filters (same filters as the Companies "
              "tab; status is one of new, phone_only, email_found, queued, contacted, replied, "
-             "opted_out; has is website, phone or email). The operator gets a download button.",
+             "opted_out; tier is A (named person with a direct line), B (named, no line), C (company inbox or phone only) or D (no way in), e.g. AB; has is website, phone or email). The operator gets a download button.",
              False, _export),
         Tool("set_setting", "key (dotted, e.g. icp.geography), value (JSON)",
              "Change one setting in the config file, validated first.", True, _set_setting),
@@ -528,7 +587,8 @@ def build_tools() -> list[Tool]:
 _GET_PATHS = {"logs": "/api/harvey/logs", "signals": "/api/signals",
               "discover_providers": "/api/discover/providers", "usage": "/api/usage",
               "runs": "/api/runs", "scoring_status": "/api/leads/score",
-              "people_research_status": "/api/people/research"}
+              "people_research_status": "/api/people/research",
+              "pipeline": "/api/pipeline", "tasks": "/api/tasks"}
 
 
 def _tools() -> dict[str, Tool]:
