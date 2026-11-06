@@ -20,6 +20,7 @@ from harvey.pidfile import (
 )
 from harvey.contact_lookup import run_contact_lookup
 from harvey.lead_scoring import run_lead_scoring
+from harvey.people_research import run_people_research
 from harvey.pipeline import run_profile_stage
 from harvey.state import StateManager
 
@@ -433,6 +434,11 @@ async def heartbeat(stop_event: asyncio.Event | None = None):
             if (action in ("prospect", "idle") and config.lead_scoring.per_cycle
                     and config.lead_scoring.criteria):
                 tasks.append(("score", run_lead_scoring(state, brain, config)))
+
+            # The people who decide at the best leads (people_research), while
+            # the KEY_PEOPLE signal is confirmed: a few companies a cycle.
+            if action in ("prospect", "idle") and config.people_research.per_cycle:
+                tasks.append(("people", run_people_research(state, brain, config, env)))
 
             outcomes = await _run_agents(tasks)
 

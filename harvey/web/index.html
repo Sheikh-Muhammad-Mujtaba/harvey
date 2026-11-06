@@ -303,6 +303,8 @@
       chasing, and export exactly what you filtered. Click a row for its contact details, score,
       notes and contacts.</p></div>
     <div class="page-actions">
+      <button class="btn btn-secondary btn-sm" id="leads-score" onclick="startLeadJob('scoring', this)" title="Score up to 50 unscored leads in the background, using the Lead type and Location filters"><svg class="icon" aria-hidden="true"><use href="#i-insights"/></svg>Score leads</button>
+      <button class="btn btn-secondary btn-sm" id="leads-people" onclick="startLeadJob('people', this)" title="Find the people who decide at up to 20 leads in the background, starred and best-scored first, using the Lead type, Location, Score and Starred filters"><svg class="icon" aria-hidden="true"><use href="#i-contacts"/></svg>Find people</button>
       <button class="btn btn-secondary btn-sm" id="leads-export" onclick="exportLeads(this)"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export filtered</button>
     </div>
   </div>
@@ -326,6 +328,8 @@
     </select>
     <label class="lf-check"><input type="checkbox" id="lf-starred" onchange="leadFilterChanged()"> Starred only</label>
   </div>
+  <div class="job-status" id="job-scoring" role="status" aria-live="polite" hidden></div>
+  <div class="job-status" id="job-people" role="status" aria-live="polite" hidden></div>
   <div id="companies-list"></div>
 </div>
 

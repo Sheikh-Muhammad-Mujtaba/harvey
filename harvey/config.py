@@ -668,6 +668,22 @@ class LeadScoringConfig(BaseModel):
     star_at: int = Field(default=75, ge=0, le=100)
 
 
+class PeopleResearchConfig(BaseModel):
+    """Find the people to talk to at a company (see people_research.py).
+
+    ``roles`` maps a service tag (icp.service_tags) to the job titles that
+    decide on it (e.g. marketing head for marketing, finance or operations
+    head for ERP); a service not listed uses ``icp.titles``. Once the
+    KEY_PEOPLE signal is confirmed, each prospecting cycle researches
+    ``per_cycle`` companies, starred and best-scored first (one Claude call
+    with web search each), keeping up to ``people_per_company`` people.
+    """
+    roles: dict[str, list[str]] = {}
+    per_cycle: int = Field(default=2, ge=0, le=20)
+    people_per_company: int = Field(default=3, ge=1, le=5)
+    min_score: int = Field(default=0, ge=0, le=100)
+
+
 class HarveyConfig(BaseModel):
     persona: PersonaConfig
     product: ProductConfig
@@ -679,6 +695,7 @@ class HarveyConfig(BaseModel):
     writer: WriterConfig = WriterConfig()
     signature: SignatureConfig = SignatureConfig()
     lead_scoring: LeadScoringConfig = LeadScoringConfig()
+    people_research: PeopleResearchConfig = PeopleResearchConfig()
     # The file it was loaded from, so a running Harvey can re-read the
     # sending mode from that same file (refresh_sending_mode).
     _source_path: str | None = PrivateAttr(default=None)

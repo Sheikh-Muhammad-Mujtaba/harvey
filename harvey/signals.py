@@ -334,6 +334,26 @@ SIGNAL_CATALOG: list[dict] = [
         "confidence_floor": 0.0,
     },
     {
+        "code": "KEY_PEOPLE",
+        "label": "Key people (web search)",
+        "description": (
+            "The people who would decide on your service at a lead (owner, marketing "
+            "head, finance or operations head...), found by Claude with web search. "
+            "A person is added as a contact only after Harvey reads the page they were "
+            "found on and sees their name there with the business's; their email is "
+            "the one that page publishes, or one learned from the company's address "
+            "pattern, and only a verified one is sent to. LinkedIn is never read: "
+            "someone seen only there stays on the company's card for you to check. "
+            "Starred and best-scored leads first, a few each cycle "
+            "(people_research.per_cycle)."
+        ),
+        "category": "people",
+        "value_type": "text",
+        "collector": "people_research",
+        "cost_note": "one Claude call with web search per company (your plan's quota)",
+        "confidence_floor": 0.0,
+    },
+    {
         "code": "CONTACT_FOUND",
         "label": "Named contact found",
         "description": "A named person scraped from the team/about page, with their title.",

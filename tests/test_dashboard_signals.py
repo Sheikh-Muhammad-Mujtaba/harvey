@@ -298,7 +298,7 @@ def test_cost_notes_are_machine_classifiable():
     """
     # CONTACT_DETAILS spends a Claude call with web search per company.
     paid = {"SERP_RANK", "MAPS_RANK", "EMAIL_STATUS", "EMAIL_PATTERN", "FOUND_IN_SERP",
-            "CONTACT_DETAILS", "LEAD_SCORE"}
+            "CONTACT_DETAILS", "LEAD_SCORE", "KEY_PEOPLE"}
     for sig in SIGNAL_CATALOG:
         free = sig["cost_note"].lower().startswith(("free", "included"))
         if sig["code"] in paid:

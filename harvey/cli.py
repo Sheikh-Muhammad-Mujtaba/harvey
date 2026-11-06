@@ -1091,6 +1091,50 @@ def cmd_score(args):
     asyncio.run(_run())
 
 
+def cmd_people(args):
+    """Find the people who decide at the best leads, with Claude's web search."""
+    from harvey import people_research
+    from harvey.brain import Brain
+    from harvey.config import load_config, load_env
+    from harvey.signals import seed_signal_catalog
+    from harvey.state import StateManager
+
+    async def _run():
+        config = load_config()
+        if config.brain.provider != "claude":
+            print("\n  People research uses Claude's web search; set brain.provider: claude.\n")
+            return
+        state = StateManager()
+        await state.init_db()
+        await seed_signal_catalog(state)
+        brain = Brain(state, config.brain)
+        companies = await people_research.companies_to_research(
+            state, config, args.limit, service=args.service, location=args.location,
+            min_score=args.min_score or None, starred_only=args.starred)
+        if not companies:
+            print("\n  No leads left to research with those filters.\n")
+            return
+        print(f"\n  Researching {len(companies)} companies (about a minute each)...\n")
+        added = 0
+        for company in companies:
+            card = await people_research.research(brain, state, config, load_env(), company,
+                                                  service=args.service)
+            if card is None:
+                print(f"  Stopped: {brain.paused_reason or 'no answer from Claude'}")
+                break
+            added += card.added
+            print(f"  {card.name[:40]:40}  {people_research.describe(card)}")
+            for p in card.people:
+                mark = "+" if p["added"] else ("?" if not p["confirmed"] else " ")
+                print(f"      {mark} {p['name']} — {p['title']}"
+                      + (f" ({p['email_status'] or 'no email'})" if p["confirmed"] else ""))
+        print(f"\n  {added} contacts added. + added, ? unconfirmed (check it yourself).\n")
+        if people_research.SIGNAL not in await state.confirmed_signal_codes():
+            print("  To research automatically each cycle: harvey signals --confirm KEY_PEOPLE\n")
+
+    asyncio.run(_run())
+
+
 def cmd_sending(args):
     """Pause/resume the sending kill switch."""
     from harvey.state import StateManager
@@ -1285,6 +1329,15 @@ def main():
     sub.add_argument("--service", default="", help="Only this service tag, e.g. 'Digital marketing'")
     sub.add_argument("--location", default="", help="Only companies whose location contains this, e.g. Denver")
     sub.set_defaults(func=cmd_score)
+
+    sub = subparsers.add_parser(
+        "people", help="Find the people who decide at the best leads (Claude web search)")
+    sub.add_argument("--limit", type=int, default=5, help="How many companies (default 5)")
+    sub.add_argument("--service", default="", help="Only this service tag, e.g. 'Digital marketing'")
+    sub.add_argument("--location", default="", help="Only companies whose location contains this, e.g. Denver")
+    sub.add_argument("--min-score", type=int, default=0, help="Only leads scored at least this")
+    sub.add_argument("--starred", action="store_true", help="Only starred leads")
+    sub.set_defaults(func=cmd_people)
 
     sub = subparsers.add_parser("sending", help="Kill switch: pause/resume sending")
     sub.add_argument("sending_action", nargs="?", default="status",

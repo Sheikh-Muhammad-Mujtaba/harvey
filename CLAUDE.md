@@ -341,6 +341,7 @@ harvey discover              # Find businesses; --providers / --estimate / --pro
 harvey sending pause|resume  # Kill switch for all outbound
 harvey contacts [--limit N] [--company NAME]  # Website/phone/email by Claude web search for companies with no usable email (automatic once CONTACT_DETAILS is confirmed)
 harvey score [--limit N] [--service TAG]  # Rank leads against lead_scoring.criteria (Claude web search); high scores are starred
+harvey people [--limit N] [--starred] [--min-score N]  # The people who decide at the best leads (Claude web search); confirmed ones become contacts
 harvey warmup [domain]       # Sending-domain readiness: SPF/DKIM/DMARC, age, blocklists, ramp, TrulyInbox warmup
 harvey trulyinbox [connect|other]  # Warmup service: connect TrulyInbox, or record another service
 ```

@@ -429,7 +429,7 @@ function loadCurrentTab() {
     case 'insights': loadInsights(); break;
     case 'signals': loadSignals(); break;
     case 'discover': loadDiscoverProviders(); break;
-    case 'companies': if (!companyDrill) loadCompanies(); break;
+    case 'companies': if (!companyDrill) loadCompanies(); loadLeadJobs(); break;
     case 'prospects': loadProspects(); break;
     case 'campaigns': loadCampaigns(); break;
     case 'outbox': loadOutbox(); break;
@@ -2492,6 +2492,86 @@ function exportLeads(btn) {
   downloadCsv('/api/leads.xlsx' + (q ? '?' + q : ''), 'leads.xlsx', btn);
 }
 
+// Background jobs on the Companies tab: lead scoring and people research.
+// Each button starts its job with the current filters (lead type, location,
+// and for people also min score and starred), and a status line under the
+// filters follows it until it finishes.
+const LEAD_JOBS = {
+  scoring: {
+    url: '/api/leads/score', button: 'leads-score', box: 'job-scoring',
+    body: f => ({limit: 50, service: f.service, location: f.location}),
+    started: 'Scoring started in the background.',
+    line: s => {
+      const high = s.high ? ', ' + s.high + ' scored ' + s.star_at + '+' : '';
+      return [s.running ? 'Scoring' : 'Last scoring run', s.scored + ' of up to ' + s.limit + ' scored' + high];
+    },
+  },
+  people: {
+    url: '/api/people/research', button: 'leads-people', box: 'job-people',
+    body: f => ({limit: 20, service: f.service, location: f.location, min_score: f.min_score,
+                 starred_only: !!f.starred}),
+    started: 'Finding people in the background.',
+    line: s => [s.running ? 'Finding people' : 'Last people search',
+      s.researched + ' of up to ' + s.limit + ' companies, ' + s.people_added + ' contacts added' +
+      (s.unconfirmed ? ', ' + s.unconfirmed + ' to check yourself' : '')],
+  },
+};
+const _jobTimers = {};
+const _jobSeen = {};
+
+async function startLeadJob(kind, btn) {
+  const job = LEAD_JOBS[kind];
+  const body = Object.fromEntries(Object.entries(job.body(leadFilters())).filter(([, v]) => v));
+  btn.disabled = true;
+  const r = await api(job.url + '/run', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                         body: JSON.stringify(body)});
+  btn.disabled = false;
+  if (!r || r.success === false) { showToast((r && r.message) || 'Couldn\'t start it.', 'error'); return; }
+  showToast(job.started, 'success');
+  loadLeadJob(kind);
+}
+
+async function stopLeadJob(kind) {
+  const r = await api(LEAD_JOBS[kind].url + '/stop', {method: 'POST'});
+  if (r) showToast(r.message || 'Stopping.', 'success');
+  loadLeadJob(kind);
+}
+
+function loadLeadJobs() {
+  Object.keys(LEAD_JOBS).forEach(loadLeadJob);
+}
+
+async function loadLeadJob(kind) {
+  const job = LEAD_JOBS[kind];
+  clearTimeout(_jobTimers[kind]);
+  const el = document.getElementById(job.box);
+  const btn = document.getElementById(job.button);
+  if (!el) return;
+  const s = await api(job.url);
+  if (!s || !s.started_at) { el.hidden = true; if (btn) btn.disabled = false; return; }
+  const what = [s.service || 'every lead type', s.location].filter(Boolean).join(' in ');
+  const [label, progress] = job.line(s);
+  let text = (s.running ? '<span class="pulse" aria-hidden="true"></span>' : '') +
+    escHtml(label) + ' (' + escHtml(what) + '): ' + escHtml(progress);
+  if (s.running) {
+    if (s.stopping) text += ' · stopping after this one';
+    if (s.current) text += '<div class="muted">Now: ' + escHtml(s.current) + '</div>';
+  } else {
+    text += ' · ' + escHtml(s.error ? 'failed: ' + s.error : s.stopped || 'finished') +
+      (s.finished_at ? ' <span class="muted">' + escHtml(s.finished_at) + ' UTC</span>' : '');
+  }
+  el.innerHTML = '<div class="job-text">' + text + '</div>' + (s.running && !s.stopping
+    ? '<button class="btn btn-secondary btn-sm" onclick="stopLeadJob(\'' + kind + '\')">Stop</button>' : '');
+  el.hidden = false;
+  if (btn) btn.disabled = !!s.running;
+  // New results in: refresh the list (not while a company is open).
+  const done = (s.scored || 0) + (s.researched || 0);
+  if (_jobSeen[kind] >= 0 && done !== _jobSeen[kind] && !companyDrill &&
+      document.getElementById('companies').classList.contains('active')) loadCompanies();
+  _jobSeen[kind] = s.running ? done : -1;
+  if (s.running) _jobTimers[kind] = setTimeout(() => loadLeadJob(kind), 10000);
+}
+
 // Which of your services a lead is for (icp.service_tags), as chips.
 function serviceTags(row) {
   return (row.service_tags || []).map(t => ' <span class="tag service">' + escHtml(t) + '</span>').join('');
@@ -2553,6 +2633,30 @@ function scoreCardHtml(company) {
     '<p class="muted contact-card-foot">Judged by Claude from a web search against your criteria (lead_scoring in the config).</p></div>';
 }
 
+// Who people research found at the company (KEY_PEOPLE). Confirmed people
+// are also in the Contacts table below; unconfirmed ones are only here.
+function peopleCardHtml(company) {
+  const card = company.people_card;
+  if (!card || !(card.people || []).length) return '';
+  const link = (url, text) => safeHref(url)
+    ? '<a href="' + safeHref(url) + '" target="_blank" rel="noopener noreferrer">' + text + '</a>' : '';
+  const rows = card.people.map(p => {
+    const state = p.added ? '<span class="tag good">added</span>'
+      : p.confirmed ? '<span class="tag">' + escHtml(p.note || 'confirmed') + '</span>'
+      : '<span class="tag warn">unconfirmed</span>';
+    const links = [link(p.confirmed_on || p.source, 'source'), link(p.linkedin, 'LinkedIn')].filter(Boolean).join(' · ');
+    return '<li><div><b>' + escHtml(p.name) + '</b>' + (p.title ? ' <span class="muted">' + escHtml(p.title) + '</span>' : '') +
+      ' ' + state + '</div>' +
+      ((p.why || (!p.confirmed && p.note)) ? '<div class="muted">' + escHtml(p.confirmed ? p.why : (p.note || p.why)) + '</div>' : '') +
+      (links ? '<div class="muted">' + links + '</div>' : '') + '</li>';
+  }).join('');
+  return '<div class="card"><div class="card-title">People' +
+    (card.service ? ' <span class="tag service">' + escHtml(card.service) + '</span>' : '') + '</div>' +
+    '<ul class="lead-people">' + rows + '</ul>' +
+    '<p class="muted contact-card-foot">Found by Claude with web search. Added only when Harvey saw the name on a page it read; ' +
+    'check unconfirmed ones yourself before adding them.</p></div>';
+}
+
 function notesHtml(company, index) {
   const lines = String(company.notes || '').split('\n').filter(Boolean);
   return '<div class="card"><div class="card-title">Notes</div>' +
@@ -2588,11 +2692,11 @@ async function showCompanyContacts(index) {
     '&larr; All companies</button>' +
     '<div class="lead-head">' + starButton(company, index) + '<h3>' + escHtml(company.name) + '</h3>' + serviceTags(company) +
     (company.lead_status ? ' ' + statusChip(company) : '') + '</div>' +
-    '<div class="lead-cards">' + contactCardHtml(company) + scoreCardHtml(company) + notesHtml(company, index) + '</div>' +
+    '<div class="lead-cards">' + contactCardHtml(company) + scoreCardHtml(company) + peopleCardHtml(company) + notesHtml(company, index) + '</div>' +
     '<div class="card flush"><div class="card-head"><h3>Contacts</h3>' +
     '<span class="meta">' + escHtml([company.industry, company.location].filter(Boolean).join(' · ')) + '</span></div>';
   if (!data || !data.length) {
-    html += '<div class="empty"><div class="copy">No contacts found at this company yet. Ask Harvey to research it.</div></div></div>';
+    html += '<div class="empty"><div class="copy">No contacts found at this company yet. Ask Harvey to find its people, or use Find people.</div></div></div>';
   } else {
     html += '<table><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Status</th><th>Source</th></tr></thead><tbody>';
     for (const p of data) {
@@ -3160,7 +3264,7 @@ setInterval(() => {
   if (document.hidden || _locked) return;
   switch (currentTab) {
     case 'today': loadToday(); loadTrend(); loadFunnel(); loadRuns(); loadTodayActivity(); break;
-    case 'companies': if (!companyDrill) loadCompanies(); break;
+    case 'companies': if (!companyDrill) loadCompanies(); loadLeadJobs(); break;
     case 'prospects': loadProspects(); break;
     case 'campaigns': loadCampaigns(); break;
     case 'conversations': loadConversations(); break;

@@ -127,7 +127,7 @@ async def _enrich(db, rows: list[dict], config):
     for r in rows:
         r["service_tags"] = service_tags.tags_for(r.get("industry") or "", config)
         r.update(email="", email_status="", contact_name="", contact_title="",
-                 contact_card=None, score_detail=None)
+                 contact_card=None, score_detail=None, people_card=None)
     ids = list(by_id)
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
@@ -148,14 +148,15 @@ async def _enrich(db, rows: list[dict], config):
                 r["contact_title"] = title or ""
         cur = await db.execute(
             f"""SELECT company_id, signal_code, value_text FROM observations
-                WHERE company_id IN ({marks}) AND signal_code IN ('CONTACT_DETAILS', 'LEAD_SCORE')
+                WHERE company_id IN ({marks}) AND signal_code IN ('CONTACT_DETAILS', 'LEAD_SCORE', 'KEY_PEOPLE')
                 ORDER BY observed_at""", chunk)
         for cid, code, text in await cur.fetchall():
             try:
                 value = json.loads(text or "{}")
             except ValueError:
                 continue
-            by_id[cid]["contact_card" if code == "CONTACT_DETAILS" else "score_detail"] = value
+            key = {"CONTACT_DETAILS": "contact_card", "KEY_PEOPLE": "people_card"}.get(code, "score_detail")
+            by_id[cid][key] = value
 
 
 async def facets(state, config) -> dict:

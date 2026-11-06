@@ -2675,6 +2675,110 @@ async def export_leads_xlsx(request: Request):
                     headers={"Content-Disposition": 'attachment; filename="leads.xlsx"'})
 
 
+# Lead scoring and people research in the background (see harvey/jobs.py).
+_scoring_job = None
+
+
+def _scoring():
+    global _scoring_job
+    if _scoring_job is None:
+        from harvey.jobs import ScoringJob
+        _scoring_job = ScoringJob()
+    return _scoring_job
+
+
+_people_job = None
+
+
+def _people():
+    global _people_job
+    if _people_job is None:
+        from harvey.jobs import PeopleJob
+        _people_job = PeopleJob()
+    return _people_job
+
+
+def _job_brain(config):
+    from harvey.brain import Brain
+    return Brain(_state(), config.brain)
+
+
+@app.get("/api/leads/score")
+async def scoring_status():
+    return _scoring().status()
+
+
+@app.post("/api/leads/score/run")
+async def start_scoring(request: Request):
+    """Score up to ``limit`` unscored leads (default 50) in the background,
+    for one service or every service with criteria, optionally in one place."""
+    from harvey.config import load_config
+    from harvey.signals import seed_signal_catalog
+    body = await _json_body(request)
+    try:
+        config = load_config()
+    except Exception as e:
+        return _refuse(f"config won't load: {e}", 500)
+    state = _state()
+    await state.init_db()
+    await seed_signal_catalog(state)
+    job = _scoring()
+    try:
+        status = job.start(state, config, _job_brain, service=str(body.get("service") or ""),
+                           location=str(body.get("location") or ""), limit=body.get("limit"))
+    except ValueError as e:
+        return _refuse(str(e), 409 if job.running else 400)
+    return {"success": True, **status}
+
+
+@app.post("/api/leads/score/stop")
+async def stop_scoring():
+    """Stops after the batch in progress (up to a few minutes)."""
+    if not _scoring().stop():
+        return {"success": True, "message": "no scoring run is going"}
+    return {"success": True, "message": "stopping after the current batch"}
+
+
+@app.get("/api/people/research")
+async def people_research_status():
+    return _people().status()
+
+
+@app.post("/api/people/research/run")
+async def start_people_research(request: Request):
+    """Find the people who decide at up to ``limit`` leads (default 20) not
+    researched yet, starred and best-scored first, in the background.
+    Optional: service, location, min_score, starred_only."""
+    from harvey.config import load_config, load_env
+    from harvey.signals import seed_signal_catalog
+    body = await _json_body(request)
+    try:
+        config = load_config()
+    except Exception as e:
+        return _refuse(f"config won't load: {e}", 500)
+    state = _state()
+    await state.init_db()
+    await seed_signal_catalog(state)
+    job = _people()
+    try:
+        status = job.start(state, config, _job_brain, env=load_env(),
+                           service=str(body.get("service") or ""),
+                           location=str(body.get("location") or ""),
+                           min_score=body.get("min_score"),
+                           starred_only=bool(body.get("starred_only")), limit=body.get("limit"))
+    except ValueError as e:
+        return _refuse(str(e), 409 if job.running else 400)
+    return {"success": True, **status}
+
+
+@app.post("/api/people/research/stop")
+async def stop_people_research():
+    """Stops after the company in progress (a minute or two)."""
+    if not _people().stop():
+        return {"success": True, "message": "no people research run is going"}
+    return {"success": True, "message": "stopping after the current company"}
+
+
 @app.post("/api/companies/{company_id}/star")
 async def star_company(company_id: str, request: Request):
     from harvey.lead_scoring import set_star

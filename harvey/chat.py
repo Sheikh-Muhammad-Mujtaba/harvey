@@ -367,6 +367,25 @@ async def _score(turn, a):
                        for r in results]}
 
 
+async def _find_people(turn, a):
+    from harvey import people_research
+    from harvey.config import load_config, load_env
+    from harvey.signals import seed_signal_catalog
+
+    config = load_config()
+    await seed_signal_catalog(turn.state)
+    company = await _company(turn, _need(a, "company"))
+    card = await people_research.research(turn.brain, turn.state, config, load_env(), company,
+                                          service=str(a.get("service") or ""))
+    if card is None:
+        raise ToolError("Claude gave no answer (paused or out of quota); try again later.")
+    return {"company": card.name, "summary": people_research.describe(card),
+            "people": [{k: p.get(k, "") for k in ("name", "title", "confirmed", "added",
+                                                  "email", "email_status", "phone",
+                                                  "linkedin", "note")} for p in card.people],
+            "note": "Only confirmed people became contacts; only verified emails are sent to."}
+
+
 async def _export(turn, a):
     """A link the page downloads from: the Excel workbook (leads plus their
     contacts) is built when it's clicked, from the same filters, and never
@@ -464,8 +483,38 @@ def build_tools() -> list[Tool]:
         Tool("star", "company, starred (true/false)",
              "Star or unstar a lead. Lead scoring never changes a star set this way.", True, _star),
         Tool("score_leads", "service?, location?, limit? (max 10), company?",
-             "Score leads now against lead_scoring.criteria (web search; about a minute per 5). "
-             "High scores star the lead.", True, _score),
+             "Score a few leads now, inside this reply, against lead_scoring.criteria (web "
+             "search; about a minute per 5). High scores star the lead. For more than 10, use "
+             "start_scoring.", True, _score),
+        Tool("start_scoring", "service?, location?, limit? (default 50, max 500)",
+             "Score many leads in the background (5 per web search, about a minute each) and "
+             "return at once; the operator can keep chatting. Leaves out service to score "
+             "every service with criteria. High scores star the lead. Check it with "
+             "scoring_status.", True,
+             _post(lambda a: "/api/leads/score/run",
+                   lambda a: {k: a[k] for k in ("service", "location", "limit") if a.get(k)})),
+        Tool("scoring_status", "", "Progress of the background scoring run: how many scored, "
+             "how many high, the best so far, and why it stopped.", False, None),
+        Tool("stop_scoring", "", "Stop the background scoring run after its current batch.",
+             True, _post(lambda a: "/api/leads/score/stop")),
+        Tool("find_people", "company (name or id), service?",
+             "Web search for the people who decide at one company (owner, marketing head, "
+             "finance head... per people_research.roles), about a minute. Each one is added "
+             "as a contact only when their name is confirmed on a page Harvey reads; their "
+             "email is found and verified. LinkedIn-only finds stay unconfirmed.", True,
+             _find_people),
+        Tool("start_people_research",
+             "service?, location?, min_score?, starred_only? (true/false), limit? (default 20, max 500)",
+             "Run find_people over many leads in the background (starred and best-scored "
+             "first, skipping companies already researched) and return at once. Check it "
+             "with people_research_status.", True,
+             _post(lambda a: "/api/people/research/run",
+                   lambda a: {k: a[k] for k in ("service", "location", "min_score",
+                                                "starred_only", "limit") if a.get(k)})),
+        Tool("people_research_status", "", "Progress of the background people research: "
+             "companies done, contacts added, unconfirmed, and why it stopped.", False, None),
+        Tool("stop_people_research", "", "Stop the background people research after the "
+             "current company.", True, _post(lambda a: "/api/people/research/stop")),
         Tool("export_leads", "service?, industry?, location?, min_score?, status?, starred?, has?, q?, sort?",
              "An Excel download (Leads sheet plus a Contacts sheet) of the leads matching these filters (same filters as the Companies "
              "tab; status is one of new, phone_only, email_found, queued, contacted, replied, "
@@ -478,7 +527,8 @@ def build_tools() -> list[Tool]:
 
 _GET_PATHS = {"logs": "/api/harvey/logs", "signals": "/api/signals",
               "discover_providers": "/api/discover/providers", "usage": "/api/usage",
-              "runs": "/api/runs"}
+              "runs": "/api/runs", "scoring_status": "/api/leads/score",
+              "people_research_status": "/api/people/research"}
 
 
 def _tools() -> dict[str, Tool]:
